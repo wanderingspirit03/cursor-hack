@@ -63,6 +63,7 @@ export interface ExtensionMessageState {
   watchAllSessions: boolean;
   setWatchAllSessions: (v: boolean) => void;
   alwaysShowLabels: boolean;
+  availableRoles: string[];
 }
 
 function saveAgentSeats(os: OfficeState): void {
@@ -98,6 +99,7 @@ export function useExtensionMessages(
   const [extensionVersion, setExtensionVersion] = useState('');
   const [watchAllSessions, setWatchAllSessions] = useState(false);
   const [alwaysShowLabels, setAlwaysShowLabels] = useState(false);
+  const [availableRoles, setAvailableRoles] = useState<string[]>([]);
 
   // Track whether initial layout has been loaded (ref to avoid re-render)
   const layoutReadyRef = useRef(false);
@@ -425,6 +427,9 @@ export function useExtensionMessages(
         } catch (err) {
           console.error(`❌ Webview: Error processing furnitureAssetsLoaded:`, err);
         }
+      } else if (msg.type === 'availableRoles') {
+        const roles = msg.roles as string[];
+        setAvailableRoles(roles);
       }
     };
     window.addEventListener('message', handler);
@@ -449,5 +454,6 @@ export function useExtensionMessages(
     watchAllSessions,
     setWatchAllSessions,
     alwaysShowLabels,
+    availableRoles,
   };
 }

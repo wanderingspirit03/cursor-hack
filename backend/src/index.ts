@@ -1,6 +1,7 @@
+import "dotenv/config";
 import { WebSocket } from "ws";
 import { createServer } from "./server.js";
-import { startFactory, getActiveAgentIds } from "./orchestrator.js";
+import { startFactory, getActiveAgentIds, getAvailableRoles, spawnAgent, killAgent } from "./orchestrator.js";
 
 const PORT = Number(process.env.PORT ?? 3001);
 
@@ -27,6 +28,13 @@ function sendInitialState(ws: WebSocket): void {
     agents: existingAgents,
   };
   ws.send(JSON.stringify(existingAgentsMsg));
+
+  // Send available roles
+  const rolesMsg = {
+    type: "availableRoles",
+    roles: getAvailableRoles(),
+  };
+  ws.send(JSON.stringify(rolesMsg));
 }
 
 /**
@@ -37,15 +45,23 @@ function handleClientMessage(_ws: WebSocket, msg: Record<string, unknown>): void
     case "webviewReady":
       console.log("[index] Frontend webview is ready");
       break;
-    case "closeAgent":
+    case "closeAgent": {
       console.log(`[index] Close agent requested: ${msg.id}`);
+      const closeId = msg.id as number;
+      killAgent(closeId, broadcast);
       break;
+    }
     case "focusAgent":
       console.log(`[index] Focus agent requested: ${msg.id}`);
       break;
-    case "openClaude":
+    case "openClaude": {
       console.log("[index] Open new Claude requested");
+      const role = (msg.role as string) ?? "Coder";
+      spawnAgent(role, broadcast)
+        .then((newId) => console.log(`[index] Spawned agent ${newId} with role ${role}`))
+        .catch((err) => console.error(`[index] Failed to spawn agent:`, err));
       break;
+    }
     case "setSoundEnabled":
       console.log(`[index] Sound enabled: ${msg.enabled}`);
       break;
@@ -62,15 +78,19 @@ function handleClientMessage(_ws: WebSocket, msg: Record<string, unknown>): void
 
 // --- Start the server and orchestrator ---
 
-const { broadcast } = createServer(PORT, {
+let broadcast: (msg: Record<string, unknown>) => void;
+
+const serverHandle = createServer(PORT, {
   onClientConnect: sendInitialState,
   onClientMessage: handleClientMessage,
 });
+broadcast = serverHandle.broadcast;
 
-// Start the mock orchestrator (runs forever, simulating agents)
-startFactory(broadcast).catch((err) => {
-  console.error("[index] Orchestrator error:", err);
-  process.exit(1);
-});
+// Auto-loop disabled — agents are spawned on-demand from the UI
+// To re-enable: uncomment the line below
+// startFactory(broadcast).catch((err) => {
+//   console.error("[index] Orchestrator error:", err);
+//   process.exit(1);
+// });
 
 console.log(`[index] Pixel-agents backend started on port ${PORT}`);

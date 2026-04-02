@@ -17,7 +17,7 @@ import {
   type AgentSession,
 } from "@mariozechner/pi-coding-agent";
 import { randomUUID } from "node:crypto";
-import { formatToolStatus, createBridgeHandler, emitAgentCreated } from "./bridge.js";
+import { formatToolStatus, createBridgeHandler, emitAgentCreated, emitAgentClosed } from "./bridge.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -41,7 +41,7 @@ interface ManagedAgent {
 // Agent role definitions
 // ---------------------------------------------------------------------------
 
-const AGENT_ROLES: AgentRole[] = [
+export const AGENT_ROLES: AgentRole[] = [
   {
     id: 1,
     name: "Planner",
@@ -191,6 +191,7 @@ async function createPiAgent(
   repoPath: string,
   broadcast: (msg: Record<string, unknown>) => void,
 ): Promise<ManagedAgent> {
+  console.log(`[orchestrator] Creating pi session for ${role.name} (id=${role.id})...`);
   const model = getModel("openrouter", "anthropic/claude-opus-4.6");
   if (!model) throw new Error("Model anthropic/claude-opus-4.6 not found");
 
@@ -206,10 +207,16 @@ async function createPiAgent(
     modelRegistry,
     sessionManager: SessionManager.inMemory(),
   });
+  console.log(`[orchestrator] Pi session created for ${role.name} (id=${role.id})`);
 
   // Subscribe to events and bridge to pixel-agents protocol
   const bridgeHandler = createBridgeHandler(role.id, broadcast);
   const unsubscribe = session.subscribe((event: any) => {
+    if (event.type === "tool_execution_start") {
+      console.log(`[bridge] Agent ${role.id} (${role.name}) TOOL: ${event.toolName}(${JSON.stringify(event.args ?? {}).slice(0, 120)})`);
+    } else if (event.type !== "message_update") {
+      console.log(`[bridge] Agent ${role.id} (${role.name}) event: ${event.type}`);
+    }
     bridgeHandler(event);
   });
 
@@ -243,6 +250,110 @@ function waitForIdle(session: AgentSession): Promise<void> {
       }
     });
   });
+}
+
+// ---------------------------------------------------------------------------
+// Dynamic agent management
+// ---------------------------------------------------------------------------
+
+let nextDynamicId = 100;
+
+interface TrackedAgent {
+  role: AgentRole;
+  cancel: () => void;
+  managed?: ManagedAgent;
+}
+
+const dynamicAgents = new Map<number, TrackedAgent>();
+
+/**
+ * Returns the list of available role names.
+ */
+export function getAvailableRoles(): string[] {
+  return AGENT_ROLES.map((r) => r.name);
+}
+
+/**
+ * Spawn a new agent by role name. Runs in the background (fire-and-forget).
+ * Returns the newly assigned agent ID.
+ */
+export async function spawnAgent(
+  roleName: string,
+  broadcast: (msg: Record<string, unknown>) => void,
+): Promise<number> {
+  const role = AGENT_ROLES.find((r) => r.name === roleName);
+  if (!role) {
+    throw new Error(`Unknown role: ${roleName}`);
+  }
+
+  const agentId = nextDynamicId++;
+  // Create a virtual role with the dynamic ID
+  const dynamicRole: AgentRole = { ...role, id: agentId };
+
+  let cancelled = false;
+  const cancel = () => {
+    cancelled = true;
+  };
+
+  dynamicAgents.set(agentId, { role: dynamicRole, cancel });
+
+  const apiKey = process.env.OPENROUTER_API_KEY;
+
+  if (!apiKey) {
+    // Mock mode — fire and forget
+    simulateAgent(dynamicRole, broadcast).catch((err) => {
+      console.error(`[orchestrator] Dynamic agent ${agentId} (${roleName}) error:`, err);
+    });
+  } else {
+    // Real mode — create a pi agent session and run in the background
+    const repoPath = process.env.FACTORY_REPO_PATH ?? process.cwd();
+    createPiAgent(dynamicRole, repoPath, broadcast)
+      .then((agent) => {
+        const tracked = dynamicAgents.get(agentId);
+        if (tracked) {
+          tracked.managed = agent;
+        } else {
+          // Already killed before session was created
+          agent.unsubscribe();
+          return;
+        }
+        return runPiAgent(agent, broadcast);
+      })
+      .catch((err) => {
+        console.error(`[orchestrator] Dynamic agent ${agentId} (${roleName}) error:`, err);
+      });
+  }
+
+  emitAgentCreated(agentId, broadcast, roleName);
+  broadcast({ type: "agentStatus", id: agentId, status: "active" });
+  console.log(`[orchestrator] Spawned dynamic agent ${agentId} (${roleName})`);
+  return agentId;
+}
+
+/**
+ * Kill a dynamically spawned agent by ID.
+ */
+export function killAgent(
+  agentId: number,
+  broadcast: (msg: Record<string, unknown>) => void,
+): void {
+  const tracked = dynamicAgents.get(agentId);
+  if (tracked) {
+    tracked.cancel();
+    if (tracked.managed) {
+      tracked.managed.unsubscribe();
+      try {
+        tracked.managed.session.abort();
+      } catch {
+        // session may not support abort, that's ok
+      }
+    }
+    dynamicAgents.delete(agentId);
+    console.log(`[orchestrator] Killed dynamic agent ${agentId} (${tracked.role.name})`);
+  } else {
+    console.warn(`[orchestrator] killAgent: no tracked agent with id ${agentId}`);
+  }
+  emitAgentClosed(agentId, broadcast);
 }
 
 // ---------------------------------------------------------------------------

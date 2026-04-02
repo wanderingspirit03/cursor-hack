@@ -315,7 +315,6 @@ function App() {
         onToggleDebugMode={handleToggleDebugMode}
         alwaysShowOverlay={alwaysShowOverlay}
         onToggleAlwaysShowOverlay={handleToggleAlwaysShowOverlay}
-        workspaceFolders={workspaceFolders}
         externalAssetDirectories={externalAssetDirectories}
         watchAllSessions={watchAllSessions}
         onToggleWatchAllSessions={() => {

@@ -52,6 +52,15 @@ export function formatToolStatus(toolName: string, args: Record<string, unknown>
       const truncated = description.length > 60 ? description.slice(0, 57) + "..." : description;
       return `Subtask: ${truncated}`;
     }
+    case "dispatch": {
+      const tasks = safeArgs.tasks as Array<Record<string, unknown>> | undefined;
+      if (tasks && tasks.length > 0) {
+        const first = (tasks[0].action ?? tasks[0].thread ?? "tasks") as string;
+        const truncated = first.length > 40 ? first.slice(0, 37) + "..." : first;
+        return `Dispatching ${tasks.length} tasks: ${truncated}`;
+      }
+      return "Dispatching parallel tasks";
+    }
     case "grep":
     case "glob":
     case "find": {
@@ -95,6 +104,21 @@ export function createBridgeHandler(
 
       case "turn_start":
         broadcast({ type: "agentStatus", id: agentId, status: "active" });
+        broadcast({ type: "agentToolsClear", id: agentId });
+        break;
+
+      case "message_start": {
+        const thinkingId = `thinking-${agentId}-${Date.now()}`;
+        broadcast({
+          type: "agentToolStart",
+          id: agentId,
+          toolId: thinkingId,
+          status: "Thinking...",
+        });
+        break;
+      }
+
+      case "message_end":
         broadcast({ type: "agentToolsClear", id: agentId });
         break;
 
