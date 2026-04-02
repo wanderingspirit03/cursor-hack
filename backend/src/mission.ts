@@ -4,6 +4,7 @@ import { Type } from "@sinclair/typebox";
 import {
   AuthStorage,
   createAgentSession,
+  createReadTool,
   ModelRegistry,
   SessionManager,
   type ToolDefinition,
@@ -11,6 +12,7 @@ import {
 } from "@mariozechner/pi-coding-agent";
 import type { AgentBackend, AgentEvent, AgentResult } from "./adapters/types.js";
 import { PiAdapter } from "./adapters/pi.js";
+import { OpenClawAdapter } from "./adapters/openclaw.js";
 import { MockAdapter } from "./adapters/mock.js";
 
 // ---------------------------------------------------------------------------
@@ -42,6 +44,7 @@ type Broadcast = (msg: Record<string, unknown>) => void;
 function getAdapter(backendName?: string): AgentBackend {
   if (!process.env.OPENROUTER_API_KEY) return new MockAdapter();
   if (backendName === "mock") return new MockAdapter();
+  if (backendName === "openclaw") return new OpenClawAdapter();
   return new PiAdapter();
 }
 
@@ -50,12 +53,16 @@ function getAdapter(backendName?: string): AgentBackend {
 // ---------------------------------------------------------------------------
 
 const MAX_CONCURRENT_AGENTS = Number(process.env.MAX_CONCURRENT_AGENTS ?? 5);
-const AGENT_TIMEOUT_MS = Number(process.env.AGENT_TIMEOUT_MS ?? 5 * 60 * 1000);
+
 
 const ORCHESTRATOR_SYSTEM_PROMPT = `You are a software factory orchestrator. You receive a task from the user and break it down into work for sub-agents. Each sub-agent is a full coding agent that can read, write, edit files and run commands in the repository.
 
+You MUST call spawn_agents to get work done. You cannot write code yourself -- you can only read files to understand the project, then delegate work to agents.
+
 Rules:
-- Break the task into parallel work when possible using spawn_agents
+- Use the read tool briefly to understand the current project state (check key files, project structure)
+- Then ALWAYS call spawn_agents to do the actual work. Do not stop without spawning agents.
+- Break the task into parallel work when possible
 - Give each agent a clear, specific task description
 - Never assign two agents work on the same file. Separate agents by file/directory scope.
 - Review agent results and spawn more agents if needed
@@ -183,6 +190,8 @@ async function runOrchestrator(
     model,
     thinkingLevel: "low",
     cwd,
+    agentDir: "/tmp/factory-orchestrator-agent",  // Empty dir -- skip all pi extensions (e.g. pi-threads)
+    tools: [createReadTool(cwd)],  // Orchestrator can read files + spawn_agents
     customTools: [spawnAgentsTool],
     authStorage,
     modelRegistry,
@@ -195,26 +204,43 @@ async function runOrchestrator(
   }
   signal.addEventListener("abort", () => session.abort());
 
-  // Subscribe to orchestrator events
-  const unsub = session.subscribe((event: any) => {
-    if (event.type === "message_start") {
-      broadcast({ type: "orchestrator_thinking" });
-    }
-  });
+  // Capture the last assistant message as the mission summary
+  let lastAssistantText = "";
 
-  try {
-    await session.prompt(userPrompt);
-    // Wait for agent_end
-    await new Promise<void>((resolve) => {
-      const u = session.subscribe((e: any) => {
-        if (e.type === "agent_end") { u(); resolve(); }
-      });
+  return new Promise<string>((resolve, reject) => {
+    const unsub = session.subscribe((event: any) => {
+      if (event.type === "message_start") {
+        broadcast({ type: "orchestrator_thinking" });
+      }
+      if (event.type === "message_end" && event.message?.role === "assistant") {
+        const content = event.message.content;
+        if (Array.isArray(content)) {
+          const text = content
+            .filter((c: any) => c.type === "text")
+            .map((c: any) => c.text)
+            .join("");
+          if (text) lastAssistantText = text;
+        }
+      }
+      if (event.type === "tool_execution_start") {
+        console.log(`[orchestrator] Tool call: ${event.toolName}(${JSON.stringify(event.args ?? {}).slice(0, 200)})`);
+      }
+      if (event.type === "agent_end") {
+        unsub();
+        console.log(`[orchestrator] Agent ended, summary: ${lastAssistantText.slice(0, 100)}...`);
+        resolve(lastAssistantText || "Mission complete");
+      }
+      if (event.type !== "message_update") {
+        console.log(`[orchestrator] Event: ${event.type}`);
+      }
     });
-  } finally {
-    unsub();
-  }
 
-  return currentMission?.summary ?? "Mission complete";
+    const fullPrompt = `${ORCHESTRATOR_SYSTEM_PROMPT}\n\nUser task: ${userPrompt}\n\nIMPORTANT: You MUST call spawn_agents now. Do NOT just read files and stop. Spawn agents to do the work.`;
+    session.prompt(fullPrompt).catch((err) => {
+      unsub();
+      reject(err);
+    });
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -304,9 +330,7 @@ async function runSingleAgent(
     },
   });
 
-  // Per-agent abort (timeout + parent)
   const agentAbort = new AbortController();
-  const timeout = setTimeout(() => agentAbort.abort(), AGENT_TIMEOUT_MS);
   if (parentSignal.aborted) agentAbort.abort();
   parentSignal.addEventListener("abort", () => agentAbort.abort());
 
@@ -326,7 +350,6 @@ async function runSingleAgent(
       },
     });
 
-    clearTimeout(timeout);
     agent.status = "done";
     agent.result = result;
     appendLog(agent, result.success ? "success" : "error", result.summary);
@@ -343,7 +366,6 @@ async function runSingleAgent(
 
     return result;
   } catch (err) {
-    clearTimeout(timeout);
     const msg = err instanceof Error ? err.message : String(err);
     agent.status = "error";
     appendLog(agent, "error", msg);

@@ -8,8 +8,8 @@ import {
 } from "@mariozechner/pi-coding-agent";
 import type { AgentBackend, AgentEvent, AgentResult } from "./types.js";
 
-export class PiAdapter implements AgentBackend {
-  name = "pi";
+export class OpenClawAdapter implements AgentBackend {
+  name = "openclaw";
 
   async runAgent(config: {
     cwd: string;
