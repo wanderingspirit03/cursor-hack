@@ -12,6 +12,7 @@ export interface GameEvents {
   'command:send': { agentId: string; command: string };
   'camera:follow': { agentId: string };
   'camera:unfollow': {};
+  'scene:changed': { scene: 'world' | 'factory' };
 }
 
 type EventCallback<T> = (data: T) => void;

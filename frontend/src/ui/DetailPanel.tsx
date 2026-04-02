@@ -92,7 +92,7 @@ export function DetailPanel({ agentId, onClose, onAssign }: DetailPanelProps) {
 
         <div className="detail-section">
           <div className="detail-label">ASSIGN TO STATION</div>
-          <div className="command-bar" style={{ padding: 0, marginTop: 4 }}>
+          <div className="command-bar">
             <select
               className="command-select"
               value={selectedStation}

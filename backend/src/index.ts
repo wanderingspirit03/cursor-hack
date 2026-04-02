@@ -11,6 +11,7 @@ function sendCurrentState(ws: WebSocket): void {
     const agents = Array.from(mission.agents.values()).map((a) => ({
       id: a.id,
       name: a.name,
+      role: a.role,
       type: "worker" as const,
       status: a.status === "working" ? "working" : a.status === "done" ? "done" : "idle",
       currentStation: null,

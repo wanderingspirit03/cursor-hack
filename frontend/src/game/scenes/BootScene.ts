@@ -25,6 +25,12 @@ const TILE_ASSETS = [
   'structure-wall', 'structure-window-wide', 'structure-window',
   'structure-yellow-high', 'structure-yellow-medium', 'structure-yellow-short', 'structure-yellow-tall',
   'top-large', 'top',
+  // Custom brick wall tiles — oriented
+  'brick-wall-east', 'brick-tall-east', 'brick-short-east',
+  'brick-window-east', 'brick-door-east',
+  'brick-wall-south', 'brick-tall-south', 'brick-short-south',
+  'brick-window-south', 'brick-door-south',
+  'brick-corner', 'brick-corner-inner', 'brick-corner-window',
 ];
 
 export class BootScene extends Phaser.Scene {
@@ -65,15 +71,27 @@ export class BootScene extends Phaser.Scene {
     for (const key of TILE_ASSETS) {
       this.load.image(key, `tiles/${key}.png`);
     }
+
+    // Load factory building image for world view
+    this.load.image('factory-building', 'factpj.png');
+
+    // Load original pixel-agents character sprite sheets (6 palettes, 4x4 grid, 16x32 each)
+    const CHAR_COUNT = 6;
+    for (let i = 0; i < CHAR_COUNT; i++) {
+      this.load.spritesheet(`char-${i}`, `characters/char_${i}.png`, {
+        frameWidth: 16,
+        frameHeight: 32,
+      });
+    }
   }
 
   create(): void {
-    // Generate programmatic agent sprites
+    // Generate programmatic agent sprites (robots, drones) + register loaded character sheets
     generateAgentSprites(this);
 
-    // Transition
+    // Transition to world view
     this.time.delayedCall(300, () => {
-      this.scene.start('FactoryScene');
+      this.scene.start('WorldScene');
     });
   }
 }

@@ -22,22 +22,28 @@ function bootPhaser() {
   const config = createGameConfig('game-container');
   const game = new Phaser.Game(config);
 
-  // Connect mock backend once FactoryScene is ready
+  // Connect mock backend each time FactoryScene becomes active
   const backend = new MockBackendService();
+  let backendConnected = false;
 
-  game.events.on('ready', () => {
-    const checkScene = () => {
-      const scene = game.scene.getScene('FactoryScene') as FactoryScene | null;
-      if (scene && scene.scene.isActive()) {
+  const pollForFactory = () => {
+    const scene = game.scene.getScene('FactoryScene') as FactoryScene | null;
+    if (scene && scene.scene.isActive()) {
+      if (!backendConnected) {
         backend.setScene(scene);
         backend.connect().then(() => {
           console.log('[Factory Agents] Mock backend connected');
+          backendConnected = true;
         });
       } else {
-        setTimeout(checkScene, 200);
+        backend.setScene(scene);
       }
-    };
-    checkScene();
+    }
+    setTimeout(pollForFactory, 500);
+  };
+
+  game.events.on('ready', () => {
+    pollForFactory();
   });
 }
 

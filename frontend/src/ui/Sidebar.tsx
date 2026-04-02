@@ -58,9 +58,12 @@ export function Sidebar({ selectedAgentId, onSelectAgent }: SidebarProps) {
             </div>
             <div className="agent-status">
               <span className={`status-dot ${agent.status}`} />
-              {agent.status}
-              {agent.task ? ` - ${agent.task.description}` : ''}
+              {agent.status.toUpperCase()}
             </div>
+            {agent.task && (
+              <div className="agent-task-text">{agent.task.description}</div>
+            )}
+            <div className="agent-card-footer" />
           </div>
         ))}
       </div>

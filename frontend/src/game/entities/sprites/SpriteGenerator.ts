@@ -1,16 +1,6 @@
+import { FRAME_RATE } from '../../constants';
+
 const SPRITE_SIZE = 16;
-
-/** Hard hat colors per agent role */
-const HAT_COLORS = [
-  { main: '#e6c832', shadow: '#b89828' }, // yellow
-  { main: '#3264c8', shadow: '#2850a0' }, // blue
-  { main: '#c83232', shadow: '#a02828' }, // red
-  { main: '#32b432', shadow: '#289028' }, // green
-  { main: '#dc8228', shadow: '#b06820' }, // orange
-  { main: '#9648c8', shadow: '#7838a0' }, // purple
-];
-
-const SKIN_TONES = ['#e8b89a', '#c68e6a', '#8d5e3c', '#f5d0b0'];
 
 const ROBOT_COLORS = [
   { main: '#7080a0', shadow: '#506080', light: '#90a0c0', eye: '#50ff50' },
@@ -22,18 +12,18 @@ const DRONE_COLORS = [
   { main: '#605050', shadow: '#443838', light: '#807070', prop: '#b0a0a0' },
 ];
 
+const LOADED_CHAR_COUNT = 6;
+
 /**
- * Generate all agent sprite sheets as canvas textures.
- * Worker: 16x24, 4 frames (idle, walk1, walk2, work), 4 directions
- * Robot: 16x16, 4 frames, 4 directions
- * Drone: 16x16, 4 frames, 4 directions
+ * Generate all agent sprite sheets.
+ * Workers: loaded from pre-made pixel art PNGs (char-0..5), 16x32, 4 frames x 4 dirs
+ * Robot: 16x16, 4 frames, 4 directions (procedural)
+ * Drone: 16x16, 4 frames, 4 directions (procedural)
  */
 export function generateAgentSprites(scene: Phaser.Scene): void {
-  // Workers
-  for (let i = 0; i < HAT_COLORS.length; i++) {
-    for (let s = 0; s < SKIN_TONES.length; s++) {
-      generateWorkerSheet(scene, `worker-${i}-${s}`, HAT_COLORS[i], SKIN_TONES[s]);
-    }
+  // Workers: register animations from loaded sprite sheets
+  for (let i = 0; i < LOADED_CHAR_COUNT; i++) {
+    registerWorkerAnims(scene, i);
   }
 
   // Robots
@@ -47,118 +37,48 @@ export function generateAgentSprites(scene: Phaser.Scene): void {
   }
 }
 
-function generateWorkerSheet(
-  scene: Phaser.Scene,
-  key: string,
-  hat: { main: string; shadow: string },
-  skin: string
-): void {
-  const frameW = SPRITE_SIZE;
-  const frameH = 24;
-  const cols = 4; // idle, walk1, walk2, work
-  const rows = 4; // down, up, right, left
+/** Register walk/idle/work animations for a loaded character sprite sheet. */
+function registerWorkerAnims(scene: Phaser.Scene, charIndex: number): void {
+  const key = `char-${charIndex}`;
+  const dirs = ['down', 'up', 'right', 'left'];
 
-  const canvas = document.createElement('canvas');
-  canvas.width = frameW * cols;
-  canvas.height = frameH * rows;
-  const ctx = canvas.getContext('2d')!;
+  for (let d = 0; d < 4; d++) {
+    const row = d * 4; // 4 frames per row in the sprite sheet
 
-  for (let dir = 0; dir < 4; dir++) {
-    for (let frame = 0; frame < 4; frame++) {
-      const ox = frame * frameW;
-      const oy = dir * frameH;
-      drawWorker(ctx, ox, oy, dir, frame, hat, skin);
+    if (!scene.anims.exists(`${key}-idle-${dirs[d]}`)) {
+      scene.anims.create({
+        key: `${key}-idle-${dirs[d]}`,
+        frames: [{ key, frame: row }],
+        frameRate: 1,
+      });
+    }
+
+    if (!scene.anims.exists(`${key}-walk-${dirs[d]}`)) {
+      scene.anims.create({
+        key: `${key}-walk-${dirs[d]}`,
+        frames: [
+          { key, frame: row },
+          { key, frame: row + 1 },
+          { key, frame: row },
+          { key, frame: row + 2 },
+        ],
+        frameRate: FRAME_RATE,
+        repeat: -1,
+      });
+    }
+
+    if (!scene.anims.exists(`${key}-work-${dirs[d]}`)) {
+      scene.anims.create({
+        key: `${key}-work-${dirs[d]}`,
+        frames: [
+          { key, frame: row + 3 },
+          { key, frame: row },
+        ],
+        frameRate: FRAME_RATE / 2,
+        repeat: -1,
+      });
     }
   }
-
-  scene.textures.addSpriteSheet(key, canvas as unknown as HTMLImageElement, { frameWidth: frameW, frameHeight: frameH });
-}
-
-function drawWorker(
-  ctx: CanvasRenderingContext2D,
-  ox: number,
-  oy: number,
-  dir: number,
-  frame: number,
-  hat: { main: string; shadow: string },
-  skin: string
-): void {
-  const walkOffset = frame === 1 ? -1 : frame === 2 ? 1 : 0;
-  const isWork = frame === 3;
-
-  // Legs (row 18-23 from top)
-  ctx.fillStyle = '#2a2a50';
-  if (dir === 0 || dir === 1) {
-    // front/back — two legs
-    ctx.fillRect(ox + 5, oy + 18 + walkOffset, 2, 5);
-    ctx.fillRect(ox + 9, oy + 18 - walkOffset, 2, 5);
-  } else {
-    // side — offset legs
-    ctx.fillRect(ox + 6, oy + 18 + walkOffset, 2, 5);
-    ctx.fillRect(ox + 8, oy + 18 - walkOffset, 2, 5);
-  }
-
-  // Boots
-  ctx.fillStyle = '#1a1a1a';
-  ctx.fillRect(ox + 5, oy + 22, 2, 2);
-  ctx.fillRect(ox + 9, oy + 22, 2, 2);
-
-  // Body (overalls)
-  ctx.fillStyle = '#4060a0';
-  ctx.fillRect(ox + 4, oy + 10, 8, 8);
-
-  // Arms
-  ctx.fillStyle = '#4060a0';
-  if (isWork) {
-    // Arms extended forward
-    if (dir === 0) {
-      ctx.fillRect(ox + 2, oy + 11, 2, 5);
-      ctx.fillRect(ox + 12, oy + 11, 2, 5);
-    } else if (dir === 2 || dir === 3) {
-      ctx.fillRect(ox + 3, oy + 10, 2, 6);
-      ctx.fillRect(ox + 11, oy + 10, 2, 6);
-    } else {
-      ctx.fillRect(ox + 3, oy + 11, 2, 5);
-      ctx.fillRect(ox + 11, oy + 11, 2, 5);
-    }
-  } else {
-    ctx.fillRect(ox + 2, oy + 11 + walkOffset, 2, 5);
-    ctx.fillRect(ox + 12, oy + 11 - walkOffset, 2, 5);
-  }
-
-  // Hands
-  ctx.fillStyle = skin;
-  if (isWork) {
-    ctx.fillRect(ox + 2, oy + 15, 2, 2);
-    ctx.fillRect(ox + 12, oy + 15, 2, 2);
-  } else {
-    ctx.fillRect(ox + 2, oy + 15 + walkOffset, 2, 2);
-    ctx.fillRect(ox + 12, oy + 15 - walkOffset, 2, 2);
-  }
-
-  // Head
-  ctx.fillStyle = skin;
-  ctx.fillRect(ox + 5, oy + 4, 6, 6);
-
-  // Eyes
-  ctx.fillStyle = '#1a1a1a';
-  if (dir === 0) {
-    ctx.fillRect(ox + 6, oy + 6, 1, 2);
-    ctx.fillRect(ox + 9, oy + 6, 1, 2);
-  } else if (dir === 1) {
-    // Back — no eyes
-  } else if (dir === 2) {
-    ctx.fillRect(ox + 9, oy + 6, 1, 2);
-  } else {
-    ctx.fillRect(ox + 6, oy + 6, 1, 2);
-  }
-
-  // Hard hat
-  ctx.fillStyle = hat.main;
-  ctx.fillRect(ox + 4, oy + 2, 8, 3);
-  ctx.fillRect(ox + 3, oy + 4, 10, 1);
-  ctx.fillStyle = hat.shadow;
-  ctx.fillRect(ox + 4, oy + 4, 8, 1);
 }
 
 function generateRobotSheet(
@@ -319,9 +239,7 @@ function drawDrone(
 
 export function getAgentSpriteKey(type: string, variant: number): string {
   if (type === 'worker') {
-    const hat = variant % HAT_COLORS.length;
-    const skin = Math.floor(variant / HAT_COLORS.length) % SKIN_TONES.length;
-    return `worker-${hat}-${skin}`;
+    return `char-${variant % LOADED_CHAR_COUNT}`;
   } else if (type === 'robot') {
     return `robot-${variant % ROBOT_COLORS.length}`;
   } else {
@@ -330,5 +248,5 @@ export function getAgentSpriteKey(type: string, variant: number): string {
 }
 
 export function getFrameHeight(type: string): number {
-  return type === 'worker' ? 24 : 16;
+  return type === 'worker' ? 32 : 16;
 }

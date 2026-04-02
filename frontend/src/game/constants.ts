@@ -1,24 +1,24 @@
-// Isometric tile dimensions (2:1 ratio diamond)
-export const TILE_WIDTH = 64;
-export const TILE_HEIGHT = 32;
+// Isometric tile dimensions matching Kenney Conveyor Kit diamond (44x22 in 64x64 images)
+export const TILE_WIDTH = 44;
+export const TILE_HEIGHT = 22;
 export const TILE_IMG_SIZE = 64; // actual image is 64x64
 
 // Map grid
-export const MAP_COLS = 16;
-export const MAP_ROWS = 16;
+export const MAP_COLS = 36;
+export const MAP_ROWS = 30;
 
 // Zoom
-export const ZOOM_DEFAULT = 1.5;
-export const ZOOM_MIN = 0.5;
-export const ZOOM_MAX = 3;
-export const ZOOM_STEP = 0.25;
+export const ZOOM_DEFAULT = 1.2;
+export const ZOOM_MIN = 0.6;
+export const ZOOM_MAX = 4;
+export const ZOOM_STEP = 0.12;
 
 // Camera
 export const PAN_SPEED = 6;
 
 // Colors
 export const COLORS = {
-  BG: 0x1a1a2e,
+  BG: 0x2a2218,
   UI_BG: 0x14141e,
   UI_BORDER: 0x2a2a3a,
   UI_TEXT: 0xc8c8d0,
@@ -41,11 +41,11 @@ export const STATIONS = {
 
 // Station configs — positions in isometric grid coords
 export const STATION_CONFIGS = [
-  { id: STATIONS.CODING_DESK, label: 'Coding Desk', col: 3, row: 3, tileKey: 'scanner-high', color: 0x4a9eff },
-  { id: STATIONS.TEST_CHAMBER, label: 'Test Chamber', col: 10, row: 3, tileKey: 'scanner-low', color: 0x32b432 },
-  { id: STATIONS.REVIEW_TERMINAL, label: 'Review Terminal', col: 3, row: 10, tileKey: 'robot-arm-a', color: 0xdc8228 },
-  { id: STATIONS.DEPLOY_BAY, label: 'Deploy Bay', col: 10, row: 10, tileKey: 'robot-arm-b', color: 0xc83232 },
-  { id: STATIONS.DATA_PIPELINE, label: 'Data Pipeline', col: 7, row: 7, tileKey: 'conveyor-bars-stripe', color: 0xe6c832 },
+  { id: STATIONS.CODING_DESK, label: 'Coding Desk', col: 4, row: 4, tileKey: 'scanner-high', color: 0x4a9eff },
+  { id: STATIONS.TEST_CHAMBER, label: 'Test Chamber', col: 20, row: 4, tileKey: 'scanner-low', color: 0x32b432 },
+  { id: STATIONS.REVIEW_TERMINAL, label: 'Review Terminal', col: 4, row: 16, tileKey: 'scanner-high', color: 0xdc8228 },
+  { id: STATIONS.DEPLOY_BAY, label: 'Deploy Bay', col: 20, row: 16, tileKey: 'scanner-low', color: 0xc83232 },
+  { id: STATIONS.DATA_PIPELINE, label: 'Data Pipeline', col: 28, row: 14, tileKey: 'conveyor-bars-stripe-high', color: 0xe6c832 },
 ] as const;
 
 // Agent movement
