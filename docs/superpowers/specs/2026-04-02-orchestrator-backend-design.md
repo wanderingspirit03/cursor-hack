@@ -18,7 +18,20 @@ Refactor the backend from a fixed-role pipeline to an LLM-driven orchestrator th
 
 ## Orchestrator
 
-A single LLM session (using the configured backend) with a minimal system prompt and one tool.
+The orchestrator is **not** run through the `AgentBackend` adapter. It is a bespoke pi-coding-agent session created directly in `mission.ts` with the `spawn_agents` tool injected. Sub-agents are run through the adapter. This keeps the adapter interface simple (no custom tools parameter) while giving the orchestrator its special capability.
+
+```
+mission.ts:
+  orchestrator = createAgentSession({
+    model: getModel("openrouter", ORCHESTRATOR_MODEL),
+    cwd,
+    tools: [spawnAgentsTool],   // <-- injected directly, not via adapter
+    ...
+  })
+
+  // Sub-agents go through the adapter:
+  adapter.runAgent({ cwd, task, onEvent, signal })
+```
 
 ### System Prompt
 
@@ -78,6 +91,7 @@ type AgentEvent =
   | { type: "thinking" }
   | { type: "tool_start"; toolName: string; args: Record<string, unknown> }
   | { type: "tool_end"; toolId: string }
+  | { type: "log"; message: string }
   | { type: "error"; message: string };
 
 interface AgentResult {
@@ -104,43 +118,147 @@ Wraps `@mariozechner/pi-coding-agent` SDK:
 
 Uses the same pi-coding-agent SDK (OpenClaw embeds pi). Same implementation as Pi adapter but may use OpenClaw's custom tool suite or resource loader if needed. For v1, identical to Pi adapter.
 
+### Mock Adapter
+
+Simulates agent work without API calls. Used when no API key is set or for demos/development.
+
+```typescript
+// adapters/mock.ts
+class MockAdapter implements AgentBackend {
+  name = "mock";
+
+  async runAgent(config: {
+    cwd: string;
+    task: string;
+    onEvent: (event: AgentEvent) => void;
+    signal?: AbortSignal;
+  }): Promise<AgentResult> {
+    // Simulate thinking (1-2s)
+    config.onEvent({ type: "thinking" });
+    await delay(1500);
+
+    // Simulate 2-4 tool calls with realistic names
+    const tools = pickRandom(MOCK_TOOLS, 2 + Math.floor(Math.random() * 3));
+    for (const tool of tools) {
+      if (config.signal?.aborted) return { success: false, summary: "Aborted" };
+      config.onEvent({ type: "tool_start", toolName: tool.name, args: tool.args });
+      config.onEvent({ type: "log", message: tool.logMessage });
+      await delay(1000 + Math.random() * 2000);
+      config.onEvent({ type: "tool_end", toolId: crypto.randomUUID() });
+    }
+
+    return { success: true, summary: `Completed: ${config.task.slice(0, 80)}...` };
+  }
+}
+
+const MOCK_TOOLS = [
+  { name: "bash", args: { cmd: "npm init -y" }, logMessage: "Initialized package.json" },
+  { name: "write", args: { path: "src/index.ts" }, logMessage: "Created src/index.ts" },
+  { name: "bash", args: { cmd: "npm test" }, logMessage: "All tests passed (3/3)" },
+  { name: "edit", args: { path: "src/App.tsx" }, logMessage: "Updated App component" },
+  // ... more entries
+];
+```
+
+Selection logic in `mission.ts`:
+```typescript
+function getAdapter(): AgentBackend {
+  if (!process.env.OPENROUTER_API_KEY) return new MockAdapter();
+  return process.env.AGENT_BACKEND === "openclaw" ? new OpenClawAdapter() : new PiAdapter();
+}
+```
+
 ## WebSocket Protocol
+
+The new Phaser frontend expects `agent:spawn`, `agent:update`, `agent:remove` messages with `AgentState` payloads. The bridge translates internal events to this protocol.
 
 ### Frontend -> Backend (Inbound)
 
 | Type | Fields | Description |
 |------|--------|-------------|
 | `start_mission` | `prompt: string, backend?: string` | Start a new mission |
-| `abort_mission` | — | Cancel the running mission |
+| `abort_mission` | `missionId?: string` | Cancel the running mission |
 
 ### Backend -> Frontend (Outbound)
 
 | Type | Fields | Description |
 |------|--------|-------------|
 | `mission_started` | `missionId: string` | Mission accepted |
-| `orchestrator_thinking` | — | Orchestrator LLM is thinking |
-| `orchestrator_spawning` | `agents: { id, name }[]` | Orchestrator decided to spawn agents |
-| `agent_spawned` | `id: number, name: string` | Agent session created and running |
-| `agent_thinking` | `id: number` | Agent is generating response |
-| `agent_tool` | `id: number, toolName: string, status: string` | Agent executing a tool |
-| `agent_tool_done` | `id: number` | Agent tool finished |
-| `agent_done` | `id: number, summary: string` | Agent completed its task |
-| `agent_error` | `id: number, message: string` | Agent failed |
+| `agent:spawn` | `payload: AgentState` | Agent created (frontend creates game entity) |
+| `agent:update` | `payload: Partial<AgentState>` | Agent status/logs/task changed |
+| `agent:remove` | `payload: { id: string }` | Agent finished or killed |
 | `mission_complete` | `summary: string` | All work done |
 | `mission_error` | `message: string` | Mission failed |
+
+### AgentState Payload (matches frontend types)
+
+```typescript
+{
+  id: string;            // UUID
+  name: string;          // orchestrator-assigned name (e.g., "Setup", "Designer")
+  type: "worker";        // always "worker" for now (frontend supports worker/robot/drone)
+  status: AgentStatus;   // "idle" | "assigned" | "walking" | "working" | "done"
+  currentStation: string | null;  // mapped from task type (see station mapping below)
+  task: TaskState | null;
+  x: number;
+  y: number;
+  logs: LogEntry[];      // <-- agent_log events get appended here
+}
+```
+
+### Bridge: Internal Events -> Frontend Messages
+
+| Internal Event | Frontend Message | Details |
+|----------------|------------------|---------|
+| Agent created | `agent:spawn` | Full `AgentState` with `status: "idle"` |
+| `AgentEvent.thinking` | `agent:update` | `{ status: "working" }` |
+| `AgentEvent.tool_start` | `agent:update` | `{ status: "working", task: { type, description } }` + append to `logs` |
+| `AgentEvent.tool_end` | `agent:update` | Update `task.progress` |
+| `AgentEvent.log` | `agent:update` | Append `LogEntry` to `logs` array |
+| `AgentEvent.error` | `agent:update` | Append error `LogEntry`, `status: "done"` |
+| Agent completed | `agent:update` + `agent:remove` | `{ status: "done" }`, then remove after delay |
+
+### Station Mapping
+
+The frontend has 5 stations. The bridge maps agent tasks to stations based on keywords:
+
+| Station | Keywords in task |
+|---------|-----------------|
+| `coding-desk` | write, create, implement, build, add |
+| `test-chamber` | test, verify, check, validate |
+| `review-terminal` | review, analyze, audit, inspect |
+| `deploy-bay` | deploy, ship, release, publish |
+| `data-pipeline` | data, process, transform, migrate |
+
+### Reconnection Support
+
+On new WebSocket connection, the backend sends current mission state:
+
+```typescript
+// Sent immediately on ws connect if a mission is active
+{
+  type: "mission_state",
+  missionId: string,
+  agents: AgentState[],  // current state of all active agents
+  status: "running" | "idle"
+}
+```
+
+This allows the frontend to rebuild the game scene after a page refresh without losing the mission.
 
 ## Backend File Structure
 
 ```
 backend/src/
-├── index.ts              # Entry point, WebSocket server, mission routing
+├── index.ts              # Entry point, WebSocket server, mission routing, reconnection state
 ├── server.ts             # HTTP + WebSocket server (existing, unchanged)
 ├── mission.ts            # Mission lifecycle: create orchestrator, handle spawn_agents tool
 ├── adapters/
 │   ├── types.ts          # AgentBackend, AgentEvent, AgentResult interfaces
 │   ├── pi.ts             # Pi adapter (createAgentSession + event bridge)
-│   └── openclaw.ts       # OpenClaw adapter (same as pi for v1)
-└── bridge.ts             # AgentEvent -> WebSocket message translation
+│   ├── openclaw.ts       # OpenClaw adapter (same as pi for v1)
+│   └── mock.ts           # Mock adapter for demos/development (no API key needed)
+└── bridge.ts             # AgentEvent -> frontend message translation (agent:spawn/update/remove)
 ```
 
 Files removed:
@@ -164,12 +282,18 @@ AGENT_BACKEND=pi                                 # "pi" or "openclaw"
 
 2. **Orchestrator blocks on spawn_agents.** The tool call doesn't return until all spawned agents finish. This gives the orchestrator full results to plan the next step.
 
-3. **Agents share the repo directory.** The orchestrator is responsible for sequencing work to avoid conflicts. No git worktrees or isolation.
+3. **Agents share the repo directory.** The orchestrator is responsible for sequencing work to avoid conflicts. No git worktrees or isolation. System prompt explicitly tells LLM to separate agents by file/directory scope.
 
 4. **No predefined roles.** The orchestrator LLM decides agent names and tasks dynamically based on the user's prompt. No Planner/Coder/Tester/Reviewer presets.
 
 5. **Backend adapter is a simple interface.** `runAgent(config) -> Promise<AgentResult>`. Any coding agent that can accept a task string and emit tool events can be plugged in.
 
-6. **Orchestrator and sub-agents use the same backend adapter.** The orchestrator is just another agent session, but with the `spawn_agents` tool injected.
+6. **Orchestrator bypasses the adapter.** The orchestrator is a bespoke pi session with `spawn_agents` injected directly. Sub-agents go through the adapter. This keeps the adapter interface clean (no custom tools parameter).
 
 7. **Mission is the unit of work.** One user prompt = one mission = one orchestrator session. Aborting the mission aborts the orchestrator + all active sub-agents.
+
+8. **Mock adapter for demos.** When no API key is set, the system automatically uses `MockAdapter` which simulates agent work with realistic timing and tool calls. No code changes needed to switch modes.
+
+9. **Frontend protocol compatibility.** The bridge translates internal events to the Phaser frontend's expected `agent:spawn` / `agent:update` / `agent:remove` protocol with `AgentState` payloads. This avoids any frontend changes for backend refactoring.
+
+10. **Reconnection support.** On new WebSocket connection, the backend sends current mission state so the frontend can rebuild after a page refresh.

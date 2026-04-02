@@ -1,96 +1,73 @@
 import "dotenv/config";
 import { WebSocket } from "ws";
 import { createServer } from "./server.js";
-import { startFactory, getActiveAgentIds, getAvailableRoles, spawnAgent, killAgent } from "./orchestrator.js";
+import { startMission, abortMission, getCurrentMission } from "./mission.js";
 
 const PORT = Number(process.env.PORT ?? 3001);
 
-/**
- * Send initial state to a newly connected client.
- */
-function sendInitialState(ws: WebSocket): void {
-  // Settings the frontend expects on connect
-  const settingsMsg = {
-    type: "settingsLoaded",
-    soundEnabled: false,
-    watchAllSessions: false,
-    alwaysShowLabels: true,
-    externalAssetDirectories: [],
-    lastSeenVersion: "1.0.0",
-    extensionVersion: "1.0.0",
-  };
-  ws.send(JSON.stringify(settingsMsg));
+function sendCurrentState(ws: WebSocket): void {
+  const mission = getCurrentMission();
+  if (mission && mission.status === "running") {
+    const agents = Array.from(mission.agents.values()).map((a) => ({
+      id: a.id,
+      name: a.name,
+      type: "worker" as const,
+      status: a.status === "working" ? "working" : a.status === "done" ? "done" : "idle",
+      currentStation: null,
+      task: null,
+      x: 0,
+      y: 0,
+      logs: a.logs,
+    }));
 
-  // Report existing agents
-  const existingAgents = getActiveAgentIds();
-  const existingAgentsMsg = {
-    type: "existingAgents",
-    agents: existingAgents,
-  };
-  ws.send(JSON.stringify(existingAgentsMsg));
-
-  // Send available roles
-  const rolesMsg = {
-    type: "availableRoles",
-    roles: getAvailableRoles(),
-  };
-  ws.send(JSON.stringify(rolesMsg));
+    ws.send(JSON.stringify({
+      type: "mission_state",
+      missionId: mission.missionId,
+      status: mission.status,
+      agents,
+    }));
+  } else {
+    ws.send(JSON.stringify({
+      type: "mission_state",
+      missionId: null,
+      status: "idle",
+      agents: [],
+    }));
+  }
 }
 
-/**
- * Handle messages received from the frontend.
- */
 function handleClientMessage(_ws: WebSocket, msg: Record<string, unknown>): void {
   switch (msg.type) {
-    case "webviewReady":
-      console.log("[index] Frontend webview is ready");
-      break;
-    case "closeAgent": {
-      console.log(`[index] Close agent requested: ${msg.id}`);
-      const closeId = msg.id as number;
-      killAgent(closeId, broadcast);
-      break;
-    }
-    case "focusAgent":
-      console.log(`[index] Focus agent requested: ${msg.id}`);
-      break;
-    case "openClaude": {
-      console.log("[index] Open new Claude requested");
-      const role = (msg.role as string) ?? "Coder";
-      spawnAgent(role, broadcast)
-        .then((newId) => console.log(`[index] Spawned agent ${newId} with role ${role}`))
-        .catch((err) => console.error(`[index] Failed to spawn agent:`, err));
+    case "start_mission": {
+      const prompt = msg.prompt as string;
+      if (!prompt) {
+        broadcast({ type: "mission_error", message: "No prompt provided" });
+        return;
+      }
+      const backend = msg.backend as string | undefined;
+      console.log(`[index] Starting mission: "${prompt.slice(0, 80)}..."`);
+      startMission(prompt, broadcast, backend).catch((err) => {
+        console.error("[index] Mission error:", err);
+      });
       break;
     }
-    case "setSoundEnabled":
-      console.log(`[index] Sound enabled: ${msg.enabled}`);
-      break;
-    case "setAlwaysShowLabels":
-      console.log(`[index] Always show labels: ${msg.enabled}`);
-      break;
-    case "saveLayout":
-      console.log("[index] Save layout requested");
+    case "abort_mission":
+      console.log("[index] Aborting mission");
+      abortMission(broadcast);
       break;
     default:
       console.log(`[index] Unhandled message type: ${msg.type}`);
   }
 }
 
-// --- Start the server and orchestrator ---
-
 let broadcast: (msg: Record<string, unknown>) => void;
 
 const serverHandle = createServer(PORT, {
-  onClientConnect: sendInitialState,
+  onClientConnect: sendCurrentState,
   onClientMessage: handleClientMessage,
 });
 broadcast = serverHandle.broadcast;
 
-// Auto-loop disabled — agents are spawned on-demand from the UI
-// To re-enable: uncomment the line below
-// startFactory(broadcast).catch((err) => {
-//   console.error("[index] Orchestrator error:", err);
-//   process.exit(1);
-// });
-
-console.log(`[index] Pixel-agents backend started on port ${PORT}`);
+console.log(`[index] Factory backend started on port ${PORT}`);
+console.log(`[index] API key: ${process.env.OPENROUTER_API_KEY ? "set" : "NOT SET (mock mode)"}`);
+console.log(`[index] Repo: ${process.env.FACTORY_REPO_PATH ?? process.cwd()}`);
