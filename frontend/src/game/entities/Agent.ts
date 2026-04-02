@@ -61,18 +61,18 @@ export class Agent extends Phaser.GameObjects.Container {
     const outW = 20;
     const outH = frameH * 1.5 + 4;
     this.outline = scene.add.rectangle(0, -frameH / 2, outW, outH);
-    this.outline.setStrokeStyle(2, 0x4a9eff, 0.9);
-    this.outline.setFillStyle(0x4a9eff, 0.08);
+    this.outline.setStrokeStyle(2, 0xc45a2d, 0.9);
+    this.outline.setFillStyle(0xc45a2d, 0.06);
     this.outline.setVisible(false);
     this.add(this.outline);
 
     // Status bubble
-    this.bubbleBg = scene.add.rectangle(0, -frameH - 14, 50, 12, 0x1a1a2a, 0.9);
-    this.bubbleBg.setStrokeStyle(1, 0x3a3a5a);
-    this.bubbleText = scene.add.text(0, -frameH - 14, '', {
-      fontSize: '6px',
+    this.bubbleBg = scene.add.rectangle(0, -frameH - 18, 60, 18, 0x14110e, 0.94);
+    this.bubbleBg.setStrokeStyle(2, 0x3a2a1a);
+    this.bubbleText = scene.add.text(0, -frameH - 18, '', {
+      fontSize: '8px',
       fontFamily: '"Press Start 2P", monospace',
-      color: '#c8c8d0',
+      color: '#d4c8b8',
       align: 'center',
     });
     this.bubbleText.setOrigin(0.5, 0.5);
@@ -313,8 +313,8 @@ export class Agent extends Phaser.GameObjects.Container {
   private showBubble(text: string, color: string): void {
     this.bubbleText.setText(text);
     this.bubbleText.setColor(color);
-    const w = Math.max(this.bubbleText.width + 8, 30);
-    this.bubbleBg.setSize(w, 12);
+    const w = Math.max(this.bubbleText.width + 14, 40);
+    this.bubbleBg.setSize(w, 18);
     this.bubble.setVisible(true);
   }
 

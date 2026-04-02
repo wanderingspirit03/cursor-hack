@@ -396,13 +396,13 @@ export function renderObjects(scene: Phaser.Scene, objects: PlacedObject[]): Pha
     images.push(img);
 
     if (o.label) {
-      const label = scene.add.text(px, py - 36, o.label, {
-        fontSize: '7px',
+      const label = scene.add.text(px, py - 40, o.label, {
+        fontSize: '9px',
         fontFamily: '"Press Start 2P", monospace',
-        color: '#4a9eff',
+        color: '#d4c8b8',
         align: 'center',
-        stroke: '#000000',
-        strokeThickness: 2,
+        stroke: '#0e0b08',
+        strokeThickness: 4,
       });
       label.setOrigin(0.5, 1);
       label.setDepth((o.col + o.row) * 10 + 100);
