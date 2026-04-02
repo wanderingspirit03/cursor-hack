@@ -1,10 +1,16 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Sidebar } from './Sidebar';
 import { DetailPanel } from './DetailPanel';
+import { MissionBar } from './MissionBar';
 import { eventBus } from '../services/EventBus';
+import type { WebSocketBackendService } from '../services/WebSocketBackend';
 import './App.css';
 
-export function App() {
+interface AppProps {
+  backend: WebSocketBackendService;
+}
+
+export function App({ backend }: AppProps) {
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [currentScene, setCurrentScene] = useState<'world' | 'factory'>('world');
 
@@ -56,12 +62,16 @@ export function App() {
   return (
     <div className="app">
       {inFactory && (
-        <Sidebar
-          selectedAgentId={selectedAgentId}
-          onSelectAgent={handleSelectAgent}
-        />
+        <div className="sidebar">
+          <Sidebar
+            selectedAgentId={selectedAgentId}
+            onSelectAgent={handleSelectAgent}
+          />
+        </div>
       )}
-      <div className="game-container" id="game-container" />
+      <div className="game-container" id="game-container">
+        {inFactory && <MissionBar backend={backend} />}
+      </div>
       {inFactory && selectedAgentId && (
         <DetailPanel
           agentId={selectedAgentId}

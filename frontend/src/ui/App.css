@@ -250,6 +250,193 @@
 .status-dot.working { background: var(--success); box-shadow: 0 0 4px rgba(90, 154, 58, 0.4); }
 .status-dot.done { background: var(--success); box-shadow: 0 0 4px rgba(90, 154, 58, 0.4); }
 
+/* Agent list panel (inner sidebar content) */
+.agent-list-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* ═══════════════════════════════════════
+   MISSION BAR
+   ═══════════════════════════════════════ */
+.mission-bar {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 660px;
+  max-width: 90%;
+  padding: 14px 18px;
+  background: rgba(20, 17, 14, 0.95);
+  border: 3px solid var(--panel-border);
+  box-shadow: 0 0 20px rgba(0, 0, 0, 0.6), 0 0 8px rgba(196, 90, 45, 0.15);
+  z-index: 100;
+}
+
+.mission-bar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.mission-bar-title {
+  font-size: 9px;
+  color: var(--rust);
+  letter-spacing: 2px;
+  text-shadow: 0 0 8px rgba(196, 90, 45, 0.3);
+}
+
+.connection-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.connection-dot.online {
+  background: var(--success);
+  box-shadow: 0 0 6px rgba(90, 154, 58, 0.6);
+}
+
+.connection-dot.offline {
+  background: var(--error);
+  box-shadow: 0 0 6px rgba(176, 48, 48, 0.6);
+}
+
+.mission-input-row {
+  display: flex;
+  gap: 6px;
+}
+
+.mission-input {
+  flex: 1;
+  background: var(--metal);
+  border: 2px solid var(--panel-border);
+  color: var(--text);
+  font-family: var(--font-pixel);
+  font-size: 9px;
+  padding: 6px 8px;
+  outline: none;
+}
+
+.mission-input::placeholder {
+  color: var(--text-dim);
+}
+
+.mission-input:focus {
+  border-color: var(--rust);
+}
+
+.mission-input:disabled {
+  opacity: 0.4;
+}
+
+.mission-btn {
+  font-family: var(--font-pixel);
+  font-size: 9px;
+  padding: 6px 10px;
+  cursor: pointer;
+  letter-spacing: 1px;
+  border: 2px solid;
+  transition: filter 0.15s, box-shadow 0.15s;
+}
+
+.mission-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+  filter: none;
+  box-shadow: none;
+}
+
+.start-btn {
+  background: var(--rust);
+  border-color: var(--rust-glow);
+  color: var(--text-bright);
+}
+
+.start-btn:hover:not(:disabled) {
+  filter: brightness(1.2);
+  box-shadow: 0 0 8px rgba(196, 90, 45, 0.4);
+}
+
+.abort-btn {
+  background: var(--error);
+  border-color: #d04040;
+  color: var(--text-bright);
+}
+
+.abort-btn:hover:not(:disabled) {
+  filter: brightness(1.2);
+  box-shadow: 0 0 8px rgba(176, 48, 48, 0.4);
+}
+
+.mission-status-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.mission-status-text {
+  font-size: 9px;
+  letter-spacing: 1px;
+  flex: 1;
+  min-width: 0;
+}
+
+.status-thinking {
+  color: var(--warning);
+  text-shadow: 0 0 6px rgba(196, 160, 32, 0.4);
+  animation: pulse-glow 1.5s ease-in-out infinite;
+}
+
+.status-spawning {
+  color: var(--success);
+  text-shadow: 0 0 6px rgba(90, 154, 58, 0.4);
+  animation: pulse-glow 1s ease-in-out infinite;
+}
+
+.status-running {
+  color: var(--rust);
+  text-shadow: 0 0 6px rgba(196, 90, 45, 0.3);
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+@keyframes pulse-glow {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.mission-result-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 9px;
+  padding: 4px 0;
+}
+
+.mission-result-row.complete {
+  color: var(--success);
+}
+
+.mission-result-row.error {
+  color: var(--error);
+}
+
+.result-icon {
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.result-text {
+  line-height: 1.4;
+  word-break: break-word;
+}
+
 /* ═══════════════════════════════════════
    GAME CONTAINER
    ═══════════════════════════════════════ */

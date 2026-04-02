@@ -80,6 +80,11 @@ export class MockBackendService implements AgentBackendService {
     }
   }
 
+  startMission(_prompt: string, _backend?: string): void {}
+  abortMission(): void {}
+  isConnected(): boolean { return true; }
+
+
   private spawnInitialAgents(): void {
     if (!this.scene) return;
 

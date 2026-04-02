@@ -41,7 +41,7 @@ export function Sidebar({ selectedAgentId, onSelectAgent }: SidebarProps) {
   const agentList = Array.from(agents.values());
 
   return (
-    <div className="sidebar">
+    <div className="agent-list-panel sidebar-inner">
       <div className="sidebar-header">AGENTS ({agentList.length})</div>
       <div className="agent-list">
         {agentList.map((agent) => (

@@ -1,6 +1,6 @@
 export type AgentType = 'worker' | 'robot' | 'drone';
 
-export type AgentStatus = 'idle' | 'assigned' | 'walking' | 'working' | 'done';
+export type AgentStatus = 'idle' | 'assigned' | 'walking' | 'working' | 'done' | 'error';
 
 export interface AgentState {
   id: string;

@@ -61,11 +61,12 @@ export class WorldScene extends Phaser.Scene {
 
     // Input
     if (this.input.keyboard) {
+      this.input.keyboard.disableGlobalCapture();
       this.wasd = {
-        W: this.input.keyboard.addKey('W'),
-        A: this.input.keyboard.addKey('A'),
-        S: this.input.keyboard.addKey('S'),
-        D: this.input.keyboard.addKey('D'),
+        W: this.input.keyboard.addKey('W', false, false),
+        A: this.input.keyboard.addKey('A', false, false),
+        S: this.input.keyboard.addKey('S', false, false),
+        D: this.input.keyboard.addKey('D', false, false),
       };
     }
 

@@ -310,7 +310,7 @@ export class Agent extends Phaser.GameObjects.Container {
     }
   }
 
-  private showBubble(text: string, color: string): void {
+  public showBubble(text: string, color: string): void {
     this.bubbleText.setText(text);
     this.bubbleText.setColor(color);
     const w = Math.max(this.bubbleText.width + 14, 40);

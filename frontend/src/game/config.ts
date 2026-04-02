@@ -26,6 +26,9 @@ export function createGameConfig(parent: string): Phaser.Types.Core.GameConfig {
       mouse: {
         preventDefaultWheel: true,
       },
+      keyboard: {
+        target: document.getElementById(parent) ?? undefined,
+      },
     },
   };
 }

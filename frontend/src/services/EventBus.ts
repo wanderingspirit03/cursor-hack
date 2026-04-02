@@ -13,6 +13,14 @@ export interface GameEvents {
   'camera:follow': { agentId: string };
   'camera:unfollow': {};
   'scene:changed': { scene: 'world' | 'factory' };
+  // Mission events
+  'mission:started': { missionId: string };
+  'mission:complete': { summary: string };
+  'mission:error': { message: string };
+  'mission:state': { missionId: string | null; status: string; agents: AgentState[] };
+  'orchestrator:thinking': {};
+  'orchestrator:spawning': { round: number; agents: { id: string; name: string; role: string }[] };
+  'connection:changed': { connected: boolean };
 }
 
 type EventCallback<T> = (data: T) => void;

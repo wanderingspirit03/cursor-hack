@@ -7,4 +7,7 @@ export interface AgentBackendService {
   onTaskUpdate(callback: (task: TaskState) => void): void;
   assignAgent(agentId: string, stationId: string): Promise<void>;
   sendCommand(agentId: string, command: string): Promise<void>;
+  startMission(prompt: string, backend?: string): void;
+  abortMission(): void;
+  isConnected(): boolean;
 }

@@ -53,13 +53,14 @@ export class FactoryScene extends Phaser.Scene {
 
     // Input
     if (this.input.keyboard != null) {
+      this.input.keyboard.disableGlobalCapture();
       this.wasd = {
-        W: this.input.keyboard.addKey('W'),
-        A: this.input.keyboard.addKey('A'),
-        S: this.input.keyboard.addKey('S'),
-        D: this.input.keyboard.addKey('D'),
+        W: this.input.keyboard.addKey('W', false, false),
+        A: this.input.keyboard.addKey('A', false, false),
+        S: this.input.keyboard.addKey('S', false, false),
+        D: this.input.keyboard.addKey('D', false, false),
       };
-      this.escKey = this.input.keyboard.addKey('ESC');
+      this.escKey = this.input.keyboard.addKey('ESC', false, false);
     }
 
     // Zoom toward cursor (clamped, no auto-exit)
@@ -134,6 +135,109 @@ export class FactoryScene extends Phaser.Scene {
     eventBus.on('camera:follow', ({ agentId }) => { this.followingAgentId = agentId; });
     eventBus.on('camera:unfollow', () => { this.followingAgentId = null; });
     eventBus.on('command:assign', ({ agentId, stationId }) => this.assignAgentToStation(agentId, stationId));
+
+    // WebSocket-driven agent lifecycle
+    eventBus.on('agent:spawned', ({ agent }) => {
+      // Only spawn if not already in scene (avoid double-spawn from own emit)
+      if (!this.agents.has(agent.id)) {
+        const variant = Math.floor(Math.random() * 24);
+        const spawned = this.spawnAgent(agent.id, agent.name, agent.type, variant);
+        // If the agent has a station assignment, walk there
+        if (agent.currentStation) {
+          const taskType = TASK_TYPES.find((t) => t.station === agent.currentStation) ?? TASK_TYPES[0];
+          const task: TaskState = agent.task ?? {
+            id: `task-${agent.id}`,
+            type: taskType.type,
+            description: taskType.description,
+            stationId: agent.currentStation,
+            progress: 0,
+            startedAt: Date.now(),
+          };
+          spawned.assignToStation(agent.currentStation, task, 999999);
+        }
+      }
+    });
+
+    eventBus.on('agent:updated', ({ agent }) => {
+      const existing = this.agents.get(agent.id);
+      if (!existing) {
+        // Agent doesn't exist yet — spawn it
+        const variant = Math.floor(Math.random() * 24);
+        const spawned = this.spawnAgent(agent.id, agent.name, agent.type, variant);
+        if (agent.currentStation) {
+          const taskType = TASK_TYPES.find((t) => t.station === agent.currentStation) ?? TASK_TYPES[0];
+          const task: TaskState = agent.task ?? {
+            id: `task-${agent.id}`,
+            type: taskType.type,
+            description: taskType.description,
+            stationId: agent.currentStation,
+            progress: 0,
+            startedAt: Date.now(),
+          };
+          spawned.assignToStation(agent.currentStation, task, 999999);
+        }
+        return;
+      }
+      // Update status visuals on existing agent
+      if (agent.status !== existing.status) {
+        if (agent.status === 'working' && existing.status === 'idle') {
+          // Agent started working — assign to station if not already there
+          if (agent.currentStation && !existing.currentStation) {
+            const taskType = TASK_TYPES.find((t) => t.station === agent.currentStation) ?? TASK_TYPES[0];
+            const task: TaskState = agent.task ?? {
+              id: `task-${agent.id}`,
+              type: taskType.type,
+              description: taskType.description,
+              stationId: agent.currentStation,
+              progress: 0,
+              startedAt: Date.now(),
+            };
+            existing.assignToStation(agent.currentStation, task, 999999);
+          } else {
+            existing.showBubble('working', '#50c878');
+          }
+        } else if (agent.status === 'done') {
+          existing.showBubble('done!', '#50c878');
+        }
+      }
+      // Append only NEW logs
+      if (agent.logs && agent.logs.length > existing.logs.length) {
+        const newLogs = agent.logs.slice(existing.logs.length);
+        for (const log of newLogs) {
+          existing.addLog(log.type, log.message);
+        }
+      }
+    });
+
+    eventBus.on('agent:removed', ({ agentId }) => {
+      const agent = this.agents.get(agentId);
+      if (agent) {
+        agent.destroy();
+        this.agents.delete(agentId);
+        // Don't call this.removeAgent() as it would re-emit agent:removed
+      }
+    });
+
+    // Restore agents on reconnect
+    eventBus.on('mission:state', ({ agents: agentStates }) => {
+      for (const agentState of agentStates) {
+        if (this.agents.has(agentState.id)) continue;
+        const variant = Math.floor(Math.random() * 24);
+        const spawned = this.spawnAgent(agentState.id, agentState.name, agentState.type, variant);
+        if (agentState.currentStation) {
+          const taskType = TASK_TYPES.find((t) => t.station === agentState.currentStation) ?? TASK_TYPES[0];
+          const task: TaskState = agentState.task ?? {
+            id: `task-${agentState.id}`,
+            type: taskType.type,
+            description: taskType.description,
+            stationId: agentState.currentStation,
+            progress: 0,
+            startedAt: Date.now(),
+          };
+          spawned.assignToStation(agentState.currentStation, task, 999999);
+        }
+      }
+    });
 
     // Emit scene change
     eventBus.emit('scene:changed', { scene: 'factory' });

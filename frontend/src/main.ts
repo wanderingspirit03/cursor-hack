@@ -3,15 +3,14 @@ import { createRoot } from 'react-dom/client';
 import { createElement } from 'react';
 import { App } from './ui/App';
 import { createGameConfig } from './game/config';
-import { MockBackendService } from './services/MockBackend';
-import type { FactoryScene } from './game/scenes/FactoryScene';
+import { WebSocketBackendService } from './services/WebSocketBackend';
 
-// Mount React UI
+export const backend = new WebSocketBackendService();
+
 const appRoot = document.getElementById('app')!;
 const root = createRoot(appRoot);
-root.render(createElement(App));
+root.render(createElement(App, { backend }));
 
-// Poll for game container (React renders async)
 function bootPhaser() {
   const gameContainer = document.getElementById('game-container');
   if (!gameContainer) {
@@ -20,31 +19,8 @@ function bootPhaser() {
   }
 
   const config = createGameConfig('game-container');
-  const game = new Phaser.Game(config);
-
-  // Connect mock backend each time FactoryScene becomes active
-  const backend = new MockBackendService();
-  let backendConnected = false;
-
-  const pollForFactory = () => {
-    const scene = game.scene.getScene('FactoryScene') as FactoryScene | null;
-    if (scene && scene.scene.isActive()) {
-      if (!backendConnected) {
-        backend.setScene(scene);
-        backend.connect().then(() => {
-          console.log('[Factory Agents] Mock backend connected');
-          backendConnected = true;
-        });
-      } else {
-        backend.setScene(scene);
-      }
-    }
-    setTimeout(pollForFactory, 500);
-  };
-
-  game.events.on('ready', () => {
-    pollForFactory();
-  });
+  new Phaser.Game(config);
 }
 
 bootPhaser();
+backend.connect().catch(() => {});
