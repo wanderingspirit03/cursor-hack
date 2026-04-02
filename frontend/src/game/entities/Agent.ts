@@ -51,8 +51,8 @@ export class Agent extends Phaser.GameObjects.Container {
     const spriteKey = getAgentSpriteKey(type, variant);
     const frameH = getFrameHeight(type);
 
-    // Sprite
-    this.sprite = scene.add.sprite(0, -frameH / 2, spriteKey, 0);
+    // Sprite — use constructor directly to avoid adding to scene display list
+    this.sprite = new Phaser.GameObjects.Sprite(scene, 0, -frameH / 2, spriteKey, 0);
     this.sprite.setOrigin(0.5, 0.5);
     this.sprite.setScale(1.5); // Scale up to match isometric tiles
     this.add(this.sprite);
@@ -60,23 +60,23 @@ export class Agent extends Phaser.GameObjects.Container {
     // Selection outline
     const outW = 20;
     const outH = frameH * 1.5 + 4;
-    this.outline = scene.add.rectangle(0, -frameH / 2, outW, outH);
+    this.outline = new Phaser.GameObjects.Rectangle(scene, 0, -frameH / 2, outW, outH);
     this.outline.setStrokeStyle(2, 0xc45a2d, 0.9);
     this.outline.setFillStyle(0xc45a2d, 0.06);
     this.outline.setVisible(false);
     this.add(this.outline);
 
     // Status bubble
-    this.bubbleBg = scene.add.rectangle(0, -frameH - 18, 60, 18, 0x14110e, 0.94);
+    this.bubbleBg = new Phaser.GameObjects.Rectangle(scene, 0, -frameH - 18, 60, 18, 0x14110e, 0.94);
     this.bubbleBg.setStrokeStyle(2, 0x3a2a1a);
-    this.bubbleText = scene.add.text(0, -frameH - 18, '', {
+    this.bubbleText = new Phaser.GameObjects.Text(scene, 0, -frameH - 18, '', {
       fontSize: '8px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#d4c8b8',
       align: 'center',
     });
     this.bubbleText.setOrigin(0.5, 0.5);
-    this.bubble = scene.add.container(0, 0, [this.bubbleBg, this.bubbleText]);
+    this.bubble = new Phaser.GameObjects.Container(scene, 0, 0, [this.bubbleBg, this.bubbleText]);
     this.bubble.setVisible(false);
     this.add(this.bubble);
 
@@ -95,7 +95,6 @@ export class Agent extends Phaser.GameObjects.Container {
     scene.add.existing(this);
 
     this.addLog('info', 'Agent spawned');
-    this.emitUpdate();
   }
 
   private createAnimations(scene: Phaser.Scene, key: string): void {

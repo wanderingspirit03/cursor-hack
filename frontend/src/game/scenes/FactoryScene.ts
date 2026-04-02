@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { generateFactoryMap, renderFloor, renderObjects } from '../tilemap/TilemapGenerator';
 import { PathfindingSystem } from '../systems/PathfindingSystem';
 import { Agent } from '../entities/Agent';
-import { eventBus } from '../../services/EventBus';
+import { eventBus, type GameEvents } from '../../services/EventBus';
 import {
   MAP_COLS, MAP_ROWS, TILE_WIDTH, TILE_HEIGHT,
   ZOOM_DEFAULT, ZOOM_MIN, ZOOM_MAX, ZOOM_STEP,
@@ -13,6 +13,8 @@ import { TASK_TYPES } from '../entities/AgentTypes';
 
 export class FactoryScene extends Phaser.Scene {
   private agents = new Map<string, Agent>();
+  private removedAgentIds = new Set<string>();
+  private boundHandlers: Array<{ event: string; handler: Function }> = [];
   private pathfinding!: PathfindingSystem;
   private wasd!: Record<string, Phaser.Input.Keyboard.Key>;
   private escKey!: Phaser.Input.Keyboard.Key;
@@ -27,6 +29,23 @@ export class FactoryScene extends Phaser.Scene {
 
   constructor() {
     super({ key: 'FactoryScene' });
+  }
+
+  /** Register an EventBus listener and track it for cleanup. */
+  private listen<K extends keyof GameEvents>(event: K, handler: (data: GameEvents[K]) => void): void {
+    eventBus.on(event, handler);
+    this.boundHandlers.push({ event: event as string, handler: handler as Function });
+  }
+
+  /** Remove all EventBus listeners and destroy agent sprites. Called by Phaser on scene stop/restart. */
+  shutdown(): void {
+    for (const { event, handler } of this.boundHandlers) {
+      eventBus.off(event as keyof GameEvents, handler as any);
+    }
+    this.boundHandlers = [];
+    this.agents.forEach((agent) => agent.destroy());
+    this.agents.clear();
+    this.removedAgentIds.clear();
   }
 
   create(): void {
@@ -129,17 +148,20 @@ export class FactoryScene extends Phaser.Scene {
     // Disable context menu so right-click drag works
     this.game.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
-    // EventBus listeners
-    eventBus.on('agent:selected', ({ agentId }) => this.selectAgent(agentId));
-    eventBus.on('agent:deselected', () => this.deselectAll());
-    eventBus.on('camera:follow', ({ agentId }) => { this.followingAgentId = agentId; });
-    eventBus.on('camera:unfollow', () => { this.followingAgentId = null; });
-    eventBus.on('command:assign', ({ agentId, stationId }) => this.assignAgentToStation(agentId, stationId));
+    // Clean up any previous listeners (defensive, in case shutdown wasn't called)
+    this.shutdown();
+
+    // EventBus listeners (tracked for cleanup)
+    this.listen('agent:selected', ({ agentId }) => this.selectAgent(agentId));
+    this.listen('agent:deselected', () => this.deselectAll());
+    this.listen('camera:follow', ({ agentId }) => { this.followingAgentId = agentId; });
+    this.listen('camera:unfollow', () => { this.followingAgentId = null; });
+    this.listen('command:assign', ({ agentId, stationId }) => this.assignAgentToStation(agentId, stationId));
 
     // WebSocket-driven agent lifecycle
-    eventBus.on('agent:spawned', ({ agent }) => {
-      // Only spawn if not already in scene (avoid double-spawn from own emit)
-      if (!this.agents.has(agent.id)) {
+    this.listen('agent:spawned', ({ agent }) => {
+      // Only spawn if not already in scene and not previously removed (avoid re-spawn race)
+      if (!this.agents.has(agent.id) && !this.removedAgentIds.has(agent.id)) {
         const variant = Math.floor(Math.random() * 24);
         const spawned = this.spawnAgent(agent.id, agent.name, agent.type, variant);
         // If the agent has a station assignment, walk there
@@ -158,7 +180,10 @@ export class FactoryScene extends Phaser.Scene {
       }
     });
 
-    eventBus.on('agent:updated', ({ agent }) => {
+    this.listen('agent:updated', ({ agent }) => {
+      // Never re-spawn an agent that was already removed (race condition guard)
+      if (this.removedAgentIds.has(agent.id)) return;
+
       const existing = this.agents.get(agent.id);
       if (!existing) {
         // Agent doesn't exist yet — spawn it
@@ -209,7 +234,8 @@ export class FactoryScene extends Phaser.Scene {
       }
     });
 
-    eventBus.on('agent:removed', ({ agentId }) => {
+    this.listen('agent:removed', ({ agentId }) => {
+      this.removedAgentIds.add(agentId);
       const agent = this.agents.get(agentId);
       if (agent) {
         agent.destroy();
@@ -218,8 +244,15 @@ export class FactoryScene extends Phaser.Scene {
       }
     });
 
+    // Clear removed tracking on new mission (fresh state)
+    this.listen('mission:started', () => {
+      this.removedAgentIds.clear();
+    });
+
     // Restore agents on reconnect
-    eventBus.on('mission:state', ({ agents: agentStates }) => {
+    this.listen('mission:state', ({ agents: agentStates }) => {
+      // Reset removed tracking — the server is giving us the authoritative agent list
+      this.removedAgentIds.clear();
       for (const agentState of agentStates) {
         if (this.agents.has(agentState.id)) continue;
         const variant = Math.floor(Math.random() * 24);
@@ -285,7 +318,6 @@ export class FactoryScene extends Phaser.Scene {
     const agent = new Agent(this, x, y, id, name, type, variant, this.pathfinding);
     this.agents.set(id, agent);
 
-    eventBus.emit('agent:spawned', { agent: agent.getState() });
     return agent;
   }
 
