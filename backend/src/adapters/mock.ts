@@ -27,6 +27,8 @@ export class MockAdapter implements AgentBackend {
   async runAgent(config: {
     cwd: string;
     task: string;
+    role?: string;
+    memoryContext?: string;
     onEvent: (event: AgentEvent) => void;
     signal?: AbortSignal;
   }): Promise<AgentResult> {

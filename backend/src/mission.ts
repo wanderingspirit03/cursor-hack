@@ -4,22 +4,37 @@ import { Type } from "@sinclair/typebox";
 import {
   AuthStorage,
   createAgentSession,
+  DefaultResourceLoader,
   ModelRegistry,
   SessionManager,
-  type ToolDefinition,
   type AgentToolResult,
+  type ToolDefinition,
 } from "@mariozechner/pi-coding-agent";
 import type { AgentBackend, AgentEvent, AgentResult } from "./adapters/types.js";
-import { PiAdapter } from "./adapters/pi.js";
 import { MockAdapter } from "./adapters/mock.js";
+import { PiAdapter } from "./adapters/pi.js";
+import {
+  KNOWN_ROLES,
+  isKnownRole,
+  loadRoleMemory,
+  updateRoleMemory,
+  type KnownRole,
+} from "./memory.js";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
+interface SpawnedAgentDef {
+  name: string;
+  role: KnownRole;
+  task: string;
+}
+
 export interface MissionAgent {
   id: string;
   name: string;
+  role: KnownRole;
   status: "idle" | "working" | "done" | "error";
   logs: { timestamp: number; message: string; type: "info" | "success" | "error" | "warning" }[];
   currentTool: string | null;
@@ -54,12 +69,31 @@ const AGENT_TIMEOUT_MS = Number(process.env.AGENT_TIMEOUT_MS ?? 5 * 60 * 1000);
 
 const ORCHESTRATOR_SYSTEM_PROMPT = `You are a software factory orchestrator. You receive a task from the user and break it down into work for sub-agents. Each sub-agent is a full coding agent that can read, write, edit files and run commands in the repository.
 
-Rules:
-- Break the task into parallel work when possible using spawn_agents
-- Give each agent a clear, specific task description
+Available roles: ${KNOWN_ROLES.join(", ")}.
+
+Role and memory rules:
+- Every spawned agent must be assigned exactly one role from the available role list.
+- Use roles consistently so each specialty builds durable memory over time.
+- Agents automatically receive the saved memory for their assigned role as additional context.
+- After reviewing agent results, call update_role_memory to persist important durable learnings for the relevant role.
+- Use the orchestrator role for your own durable operating memory when useful.
+
+Execution rules:
+- Break the task into parallel work when possible using spawn_agents.
+- Give each agent a clear, specific task description.
 - Never assign two agents work on the same file. Separate agents by file/directory scope.
-- Review agent results and spawn more agents if needed
-- When all work is done, summarize what was accomplished`;
+- Review agent results and spawn more agents if needed.
+- Update role memory only with stable facts, not speculation.
+- When all work is done, summarize what was accomplished.`;
+
+const RoleSchema = Type.Union([
+  Type.Literal("frontend"),
+  Type.Literal("backend"),
+  Type.Literal("testing"),
+  Type.Literal("devops"),
+  Type.Literal("database"),
+  Type.Literal("orchestrator"),
+]);
 
 // ---------------------------------------------------------------------------
 // Mission runner
@@ -140,6 +174,7 @@ async function runOrchestrator(
 
   const authStorage = AuthStorage.create();
   const modelRegistry = ModelRegistry.create(authStorage);
+  const orchestratorMemory = await loadRoleMemory(cwd, "orchestrator");
 
   let round = 0;
 
@@ -147,29 +182,48 @@ async function runOrchestrator(
     agents: Type.Array(
       Type.Object({
         name: Type.String({ description: "Short name for this agent (e.g. 'Setup', 'Frontend', 'Tests')" }),
+        role: RoleSchema,
         task: Type.String({ description: "Detailed task description for the agent" }),
       }),
       { description: "Array of agents to spawn" },
     ),
   });
 
+  const UpdateRoleMemoryParams = Type.Object({
+    role: RoleSchema,
+    truths: Type.Array(
+      Type.String({ description: "A durable fact or learning worth saving for this role" }),
+      { description: "Facts to append to this role's persistent memory" },
+    ),
+  });
+
   const spawnAgentsTool: ToolDefinition = {
     name: "spawn_agents",
     label: "Spawn Agents",
-    description: "Spawn one or more coding agents to work on tasks in parallel. Each agent can read, write, edit files and run commands.",
+    description: "Spawn one or more coding agents to work on tasks in parallel. Each agent must have a role from the known role set and will receive that role's saved memory as context.",
     parameters: SpawnAgentsParams,
     execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
-      const args = params as { agents: { name: string; task: string }[] };
+      const args = params as { agents: { name: string; role: string; task: string }[] };
+      const requestedAgents = args.agents
+        .filter((agent): agent is { name: string; role: KnownRole; task: string } => isKnownRole(agent.role))
+        .slice(0, MAX_CONCURRENT_AGENTS);
+
+      if (requestedAgents.length === 0) {
+        return {
+          content: [{ type: "text", text: "No valid agents were provided." }],
+          details: [],
+        } as AgentToolResult<any>;
+      }
+
       round++;
-      const agentDefs = args.agents.slice(0, MAX_CONCURRENT_AGENTS);
 
       broadcast({
         type: "orchestrator_spawning",
         round,
-        agents: agentDefs.map((a) => ({ id: randomUUID().slice(0, 8), name: a.name })),
+        agents: requestedAgents.map((a) => ({ id: randomUUID().slice(0, 8), name: a.name, role: a.role })),
       });
 
-      const results = await runAgentBatch(agentDefs, adapter, broadcast, signal, cwd);
+      const results = await runAgentBatch(requestedAgents, adapter, broadcast, signal, cwd);
       const resultText = JSON.stringify(results);
 
       return {
@@ -179,11 +233,55 @@ async function runOrchestrator(
     },
   };
 
+  const updateRoleMemoryTool: ToolDefinition = {
+    name: "update_role_memory",
+    label: "Update Role Memory",
+    description: "Append durable truths to a role's persistent memory file.",
+    parameters: UpdateRoleMemoryParams,
+    execute: async (_toolCallId, params) => {
+      const args = params as { role: string; truths: string[] };
+      if (!isKnownRole(args.role)) {
+        throw new Error(`Unknown role: ${args.role}`);
+      }
+
+      const updatedMemory = await updateRoleMemory(cwd, args.role, args.truths);
+      const truthCount = args.truths.map((truth) => truth.trim()).filter(Boolean).length;
+      const message = truthCount > 0
+        ? `Updated ${args.role} memory with ${truthCount} truth${truthCount === 1 ? "" : "s"}.`
+        : `No new truths were added to ${args.role} memory.`;
+
+      return {
+        content: [{ type: "text", text: message }],
+        details: { role: args.role, truths: args.truths, memory: updatedMemory },
+      } as AgentToolResult<any>;
+    },
+  };
+
+  const resourceLoader = new DefaultResourceLoader({
+    cwd,
+    appendSystemPromptOverride: (base) => [
+      ...base,
+      ORCHESTRATOR_SYSTEM_PROMPT,
+      ...(orchestratorMemory.trim()
+        ? [
+            [
+              "## Persistent Role Memory",
+              "Role: orchestrator",
+              "Use these saved truths as durable context, but verify them against the current repository before acting.",
+              orchestratorMemory.trim(),
+            ].join("\n\n"),
+          ]
+        : []),
+    ],
+  });
+  await resourceLoader.reload();
+
   const { session } = await createAgentSession({
     model,
     thinkingLevel: "low",
     cwd,
-    customTools: [spawnAgentsTool],
+    resourceLoader,
+    customTools: [spawnAgentsTool, updateRoleMemoryTool],
     authStorage,
     modelRegistry,
     sessionManager: SessionManager.inMemory(),
@@ -207,7 +305,10 @@ async function runOrchestrator(
     // Wait for agent_end
     await new Promise<void>((resolve) => {
       const u = session.subscribe((e: any) => {
-        if (e.type === "agent_end") { u(); resolve(); }
+        if (e.type === "agent_end") {
+          u();
+          resolve();
+        }
       });
     });
   } finally {
@@ -233,18 +334,18 @@ async function runMockOrchestrator(
   await delay(2000);
 
   // Mock: generate 2-3 agents based on the prompt
-  const mockAgents = [
-    { name: "Scaffolder", task: `Set up the project structure for: ${userPrompt}` },
-    { name: "Implementer", task: `Implement the core logic for: ${userPrompt}` },
+  const mockAgents: SpawnedAgentDef[] = [
+    { name: "Scaffolder", role: "devops", task: `Set up the project structure for: ${userPrompt}` },
+    { name: "Implementer", role: "backend", task: `Implement the core logic for: ${userPrompt}` },
   ];
   if (userPrompt.toLowerCase().includes("test")) {
-    mockAgents.push({ name: "Tester", task: `Write tests for: ${userPrompt}` });
+    mockAgents.push({ name: "Tester", role: "testing", task: `Write tests for: ${userPrompt}` });
   }
 
   broadcast({
     type: "orchestrator_spawning",
     round: 1,
-    agents: mockAgents.map((a) => ({ id: randomUUID().slice(0, 8), name: a.name })),
+    agents: mockAgents.map((a) => ({ id: randomUUID().slice(0, 8), name: a.name, role: a.role })),
   });
 
   const results = await runAgentBatch(mockAgents, adapter, broadcast, signal, cwd);
@@ -258,30 +359,30 @@ async function runMockOrchestrator(
 // ---------------------------------------------------------------------------
 
 async function runAgentBatch(
-  agentDefs: { name: string; task: string }[],
+  agentDefs: SpawnedAgentDef[],
   adapter: AgentBackend,
   broadcast: Broadcast,
   parentSignal: AbortSignal,
   cwd: string,
 ): Promise<AgentResult[]> {
-  const promises = agentDefs.map((def) =>
-    runSingleAgent(def, adapter, broadcast, parentSignal, cwd),
-  );
+  const promises = agentDefs.map((def) => runSingleAgent(def, adapter, broadcast, parentSignal, cwd));
   return Promise.all(promises);
 }
 
 async function runSingleAgent(
-  def: { name: string; task: string },
+  def: SpawnedAgentDef,
   adapter: AgentBackend,
   broadcast: Broadcast,
   parentSignal: AbortSignal,
   cwd: string,
 ): Promise<AgentResult> {
   const agentId = randomUUID().slice(0, 8);
+  const memoryContext = await loadRoleMemory(cwd, def.role);
 
   const agent: MissionAgent = {
     id: agentId,
     name: def.name,
+    role: def.role,
     status: "idle",
     logs: [],
     currentTool: null,
@@ -294,10 +395,18 @@ async function runSingleAgent(
     payload: {
       id: agentId,
       name: def.name,
+      role: def.role,
       type: "worker",
       status: "idle",
       currentStation: null,
-      task: { id: randomUUID().slice(0, 8), type: "compile", description: def.task, stationId: "coding-desk", progress: 0, startedAt: Date.now() },
+      task: {
+        id: randomUUID().slice(0, 8),
+        type: "compile",
+        description: def.task,
+        stationId: "coding-desk",
+        progress: 0,
+        startedAt: Date.now(),
+      },
       x: 0,
       y: 0,
       logs: [],
@@ -320,6 +429,8 @@ async function runSingleAgent(
     const result = await adapter.runAgent({
       cwd,
       task: def.task,
+      role: def.role,
+      memoryContext: memoryContext.trim().length > 0 ? memoryContext : undefined,
       signal: agentAbort.signal,
       onEvent: (event: AgentEvent) => {
         handleAgentEvent(agentId, agent, event, broadcast);
@@ -419,9 +530,12 @@ function appendLog(agent: MissionAgent, type: "info" | "success" | "error" | "wa
 
 function formatToolStatus(toolName: string, args: Record<string, unknown>): string {
   switch (toolName.toLowerCase()) {
-    case "read": return `Reading ${basename(String(args.file_path ?? args.path ?? "file"))}`;
-    case "write": return `Writing ${basename(String(args.file_path ?? args.path ?? "file"))}`;
-    case "edit": return `Editing ${basename(String(args.file_path ?? args.path ?? "file"))}`;
+    case "read":
+      return `Reading ${basename(String(args.file_path ?? args.path ?? "file"))}`;
+    case "write":
+      return `Writing ${basename(String(args.file_path ?? args.path ?? "file"))}`;
+    case "edit":
+      return `Editing ${basename(String(args.file_path ?? args.path ?? "file"))}`;
     case "bash":
     case "execute": {
       const cmd = String(args.command ?? args.cmd ?? "");
@@ -429,11 +543,19 @@ function formatToolStatus(toolName: string, args: Record<string, unknown>): stri
     }
     case "grep":
     case "glob":
-    case "find": return "Searching files";
-    case "ls": return "Listing directory";
-    default: return `${toolName}`;
+    case "find":
+      return "Searching files";
+    case "ls":
+      return "Listing directory";
+    default:
+      return `${toolName}`;
   }
 }
 
-function basename(p: string): string { return p.split("/").pop() ?? p; }
-function delay(ms: number): Promise<void> { return new Promise((r) => setTimeout(r, ms)); }
+function basename(p: string): string {
+  return p.split("/").pop() ?? p;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}

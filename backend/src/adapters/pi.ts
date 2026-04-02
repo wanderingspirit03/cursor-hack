@@ -3,6 +3,7 @@ import {
   AuthStorage,
   createAgentSession,
   createCodingTools,
+  DefaultResourceLoader,
   ModelRegistry,
   SessionManager,
 } from "@mariozechner/pi-coding-agent";
@@ -14,6 +15,8 @@ export class PiAdapter implements AgentBackend {
   async runAgent(config: {
     cwd: string;
     task: string;
+    role?: string;
+    memoryContext?: string;
     onEvent: (event: AgentEvent) => void;
     signal?: AbortSignal;
   }): Promise<AgentResult> {
@@ -24,11 +27,34 @@ export class PiAdapter implements AgentBackend {
     const authStorage = AuthStorage.create();
     const modelRegistry = ModelRegistry.create(authStorage);
 
+    const memoryContext = config.memoryContext?.trim();
+    const resourceLoader = memoryContext
+      ? new DefaultResourceLoader({
+          cwd: config.cwd,
+          appendSystemPromptOverride: (base) => [
+            ...base,
+            [
+              "## Persistent Role Memory",
+              config.role ? `Role: ${config.role}` : undefined,
+              "Use these saved truths as durable context for this role, but verify them against the current repository before acting.",
+              memoryContext,
+            ]
+              .filter(Boolean)
+              .join("\n\n"),
+          ],
+        })
+      : undefined;
+
+    if (resourceLoader) {
+      await resourceLoader.reload();
+    }
+
     const { session } = await createAgentSession({
       model,
       thinkingLevel: "low",
       cwd: config.cwd,
       tools: createCodingTools(config.cwd),
+      resourceLoader,
       authStorage,
       modelRegistry,
       sessionManager: SessionManager.inMemory(),

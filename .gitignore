@@ -3,3 +3,4 @@ dist/
 .env
 pi-mono/
 pixel-agents/
+.pi/

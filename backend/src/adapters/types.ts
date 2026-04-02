@@ -16,6 +16,8 @@ export interface AgentBackend {
   runAgent(config: {
     cwd: string;
     task: string;
+    role?: string;
+    memoryContext?: string;
     onEvent: (event: AgentEvent) => void;
     signal?: AbortSignal;
   }): Promise<AgentResult>;
