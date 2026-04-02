@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { BootScene } from './scenes/BootScene';
+import { WorldScene } from './scenes/WorldScene';
 import { FactoryScene } from './scenes/FactoryScene';
 import { COLORS } from './constants';
 
@@ -8,12 +9,12 @@ export function createGameConfig(parent: string): Phaser.Types.Core.GameConfig {
     type: Phaser.AUTO,
     parent,
     backgroundColor: COLORS.BG,
-    pixelArt: true,
+    antialias: false,
     scale: {
       mode: Phaser.Scale.RESIZE,
       autoCenter: Phaser.Scale.CENTER_BOTH,
     },
-    scene: [BootScene, FactoryScene],
+    scene: [BootScene, WorldScene, FactoryScene],
     physics: {
       default: 'arcade',
       arcade: {

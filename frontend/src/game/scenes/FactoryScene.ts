@@ -15,17 +15,22 @@ export class FactoryScene extends Phaser.Scene {
   private agents = new Map<string, Agent>();
   private pathfinding!: PathfindingSystem;
   private wasd!: Record<string, Phaser.Input.Keyboard.Key>;
+  private escKey!: Phaser.Input.Keyboard.Key;
   private selectedAgentId: string | null = null;
   private followingAgentId: string | null = null;
   private isPanning = false;
   private panStart = { x: 0, y: 0 };
   private camStart = { x: 0, y: 0 };
+  private isTransitioning = false;
+  private isDragging = false;
+  private dragThreshold = 5;
 
   constructor() {
     super({ key: 'FactoryScene' });
   }
 
   create(): void {
+    this.isTransitioning = false;
     this.cameras.main.setBackgroundColor(COLORS.BG);
 
     // Generate map data
@@ -54,26 +59,43 @@ export class FactoryScene extends Phaser.Scene {
         S: this.input.keyboard.addKey('S'),
         D: this.input.keyboard.addKey('D'),
       };
+      this.escKey = this.input.keyboard.addKey('ESC');
     }
 
-    // Zoom
-    this.input.on('wheel', (_pointer: Phaser.Input.Pointer, _dx: unknown, _dy: unknown, dz: number) => {
+    // Zoom toward cursor (clamped, no auto-exit)
+    this.input.on('wheel', (pointer: Phaser.Input.Pointer, _over: unknown, _dx: unknown, dz: number) => {
+      if (this.isTransitioning) return;
       const cam = this.cameras.main;
-      cam.setZoom(Phaser.Math.Clamp(cam.zoom + (dz > 0 ? -ZOOM_STEP : ZOOM_STEP), ZOOM_MIN, ZOOM_MAX));
+      const oldZoom = cam.zoom;
+      const newZoom = Phaser.Math.Clamp(
+        oldZoom * (dz > 0 ? (1 - ZOOM_STEP) : (1 + ZOOM_STEP)),
+        ZOOM_MIN,
+        ZOOM_MAX,
+      );
+      const worldBefore = cam.getWorldPoint(pointer.x, pointer.y);
+      cam.setZoom(newZoom);
+      const worldAfter = cam.getWorldPoint(pointer.x, pointer.y);
+      cam.scrollX += worldBefore.x - worldAfter.x;
+      cam.scrollY += worldBefore.y - worldAfter.y;
     });
 
-    // Middle-mouse pan
+    // Pan: any mouse button drag (left/middle/right)
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
-      if (pointer.middleButtonDown()) {
-        this.isPanning = true;
-        this.panStart = { x: pointer.x, y: pointer.y };
-        this.camStart = { x: this.cameras.main.scrollX, y: this.cameras.main.scrollY };
-        this.followingAgentId = null;
-      }
+      this.isPanning = true;
+      this.isDragging = false;
+      this.panStart = { x: pointer.x, y: pointer.y };
+      this.camStart = { x: this.cameras.main.scrollX, y: this.cameras.main.scrollY };
     });
 
     this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
-      if (this.isPanning) {
+      if (!this.isPanning || !pointer.isDown) return;
+      const movedX = Math.abs(pointer.x - this.panStart.x);
+      const movedY = Math.abs(pointer.y - this.panStart.y);
+      if (!this.isDragging && (movedX > this.dragThreshold || movedY > this.dragThreshold)) {
+        this.isDragging = true;
+        this.followingAgentId = null;
+      }
+      if (this.isDragging) {
         const dx = (this.panStart.x - pointer.x) / this.cameras.main.zoom;
         const dy = (this.panStart.y - pointer.y) / this.cameras.main.zoom;
         this.cameras.main.scrollX = this.camStart.x + dx;
@@ -81,26 +103,30 @@ export class FactoryScene extends Phaser.Scene {
       }
     });
 
-    this.input.on('pointerup', () => {
+    this.input.on('pointerup', (pointer: Phaser.Input.Pointer) => {
+      const wasDrag = this.isDragging;
       this.isPanning = false;
-    });
+      this.isDragging = false;
 
-    // Click empty space to deselect
-    this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
-      if (!pointer.leftButtonDown()) return;
-      const worldPoint = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
-      let hitAgent = false;
-      this.agents.forEach((agent) => {
-        const bounds = agent.getBounds();
-        if (bounds.contains(worldPoint.x, worldPoint.y)) {
-          hitAgent = true;
+      // Only handle click (not drag) with left button
+      if (!wasDrag && pointer.leftButtonReleased()) {
+        const worldPoint = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
+        let hitAgent = false;
+        this.agents.forEach((agent) => {
+          const bounds = agent.getBounds();
+          if (bounds.contains(worldPoint.x, worldPoint.y)) {
+            hitAgent = true;
+          }
+        });
+        if (!hitAgent) {
+          this.deselectAll();
+          this.followingAgentId = null;
         }
-      });
-      if (!hitAgent) {
-        this.deselectAll();
-        this.followingAgentId = null;
       }
     });
+
+    // Disable context menu so right-click drag works
+    this.game.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
     // EventBus listeners
     eventBus.on('agent:selected', ({ agentId }) => this.selectAgent(agentId));
@@ -108,11 +134,25 @@ export class FactoryScene extends Phaser.Scene {
     eventBus.on('camera:follow', ({ agentId }) => { this.followingAgentId = agentId; });
     eventBus.on('camera:unfollow', () => { this.followingAgentId = null; });
     eventBus.on('command:assign', ({ agentId, stationId }) => this.assignAgentToStation(agentId, stationId));
+
+    // Emit scene change
+    eventBus.emit('scene:changed', { scene: 'factory' });
+
+    // Fade in
+    this.cameras.main.fadeIn(500, 10, 10, 18);
   }
 
   update(time: number, delta: number): void {
+    if (this.isTransitioning) return;
+
     // Update agents
     this.agents.forEach((agent) => agent.update(time, delta));
+
+    // ESC to exit to world view
+    if (this.escKey?.isDown) {
+      this.exitToWorld();
+      return;
+    }
 
     // WASD pan
     if (!this.isPanning && this.wasd) {
@@ -134,8 +174,8 @@ export class FactoryScene extends Phaser.Scene {
 
   public spawnAgent(id: string, name: string, type: AgentType, variant: number): Agent {
     // Random walkable spawn in isometric coords
-    const spawnCol = 4 + Math.floor(Math.random() * 8);
-    const spawnRow = 4 + Math.floor(Math.random() * 8);
+    const spawnCol = 5 + Math.floor(Math.random() * 16);
+    const spawnRow = 10 + Math.floor(Math.random() * 8);
     const { x, y } = isoToScreen(spawnCol, spawnRow);
 
     const agent = new Agent(this, x, y, id, name, type, variant, this.pathfinding);
@@ -173,6 +213,16 @@ export class FactoryScene extends Phaser.Scene {
       this.selectedAgentId = null;
       eventBus.emit('agent:deselected', {});
     }
+  }
+
+  private exitToWorld(): void {
+    if (this.isTransitioning) return;
+    this.isTransitioning = true;
+
+    this.cameras.main.fadeOut(400, 10, 10, 18);
+    this.cameras.main.once('camerafadeoutcomplete', () => {
+      this.scene.start('WorldScene');
+    });
   }
 
   private assignAgentToStation(agentId: string, stationId: string): void {
