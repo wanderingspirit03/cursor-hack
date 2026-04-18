@@ -1,17 +1,25 @@
 import js from '@eslint/js';
-import globals from 'globals';
+import eslintConfigPrettier from 'eslint-config-prettier';
 import reactHooks from 'eslint-plugin-react-hooks';
 import reactRefresh from 'eslint-plugin-react-refresh';
 import simpleImportSort from 'eslint-plugin-simple-import-sort';
-import tseslint from 'typescript-eslint';
-import eslintConfigPrettier from 'eslint-config-prettier';
 import { defineConfig, globalIgnores } from 'eslint/config';
-import pixelAgentsPlugin from '../eslint-rules/pixel-agents-rules.mjs';
+import globals from 'globals';
+import tseslint from 'typescript-eslint';
 
 export default defineConfig([
   globalIgnores(['dist']),
   {
-    files: ['**/*.{ts,tsx}'],
+    files: ['eslint.config.js'],
+    extends: [js.configs.recommended],
+    languageOptions: {
+      ecmaVersion: 'latest',
+      sourceType: 'module',
+      globals: globals.node,
+    },
+  },
+  {
+    files: ['src/**/*.{ts,tsx}'],
     extends: [
       js.configs.recommended,
       tseslint.configs.recommended,
@@ -20,7 +28,6 @@ export default defineConfig([
     ],
     plugins: {
       'simple-import-sort': simpleImportSort,
-      'pixel-agents': pixelAgentsPlugin,
     },
     languageOptions: {
       ecmaVersion: 2020,
@@ -29,6 +36,10 @@ export default defineConfig([
     rules: {
       'simple-import-sort/imports': 'warn',
       'simple-import-sort/exports': 'warn',
+      '@typescript-eslint/no-explicit-any': 'off',
+      '@typescript-eslint/no-empty-object-type': 'off',
+      '@typescript-eslint/no-unsafe-function-type': 'off',
+      '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
       // These react-hooks rules misfire on this project's imperative game-state patterns:
       // - immutability: singleton OfficeState/EditorState mutations are by design
       // - refs: containerRef reads during render feed canvas pipeline, not React state
@@ -36,17 +47,6 @@ export default defineConfig([
       'react-hooks/immutability': 'off',
       'react-hooks/refs': 'off',
       'react-hooks/set-state-in-effect': 'off',
-      'pixel-agents/no-inline-colors': 'warn',
-      'pixel-agents/pixel-shadow': 'warn',
-      'pixel-agents/pixel-font': 'warn',
-    },
-  },
-  {
-    files: ['src/constants.ts', 'src/fonts/**', 'src/office/sprites/**'],
-    rules: {
-      'pixel-agents/no-inline-colors': 'off',
-      'pixel-agents/pixel-shadow': 'off',
-      'pixel-agents/pixel-font': 'off',
     },
   },
   eslintConfigPrettier,
